@@ -50,5 +50,5 @@ This project is being developed incrementally with a focus on:
 ## 👨‍💻 Contributors
 
 * Sanchit Agrawal
-* Project Teammate
+* Amrit Kumar Yadav
 
