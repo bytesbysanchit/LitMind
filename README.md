@@ -1,4 +1,4 @@
-# 📚 LitMind – AI Powered Novel Analyzer
+# 📚 "LitMind: Automated Literary Analysis using NLP and Network Visualization"
 
 LitMind is an AI-powered Novel Analyzer that uses Natural Language Processing (NLP) and Generative AI to analyze literary texts and provide meaningful insights.
 
