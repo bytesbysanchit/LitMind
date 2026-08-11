@@ -1,23 +1,64 @@
 from pathlib import Path
+from collections import Counter
 import spacy
 
-nlp= spacy.load("en_core_web_sm")
+# Load spaCy English model
+nlp = spacy.load("en_core_web_sm")
 
-text_path= Path("data/processed/Sherlock_Holmes.txt")
+# Path of processed text
+text_path = Path("data/processed/Sherlock_Holmes.txt")
 
-with open(text_path, "r", encoding= "utf-8") as file:
-  text= file.read()
+# Read text file
+with open(text_path, "r", encoding="utf-8") as file:
+  text = file.read()
 
-sample_text= text[:1000]
+# Process the complete text
+doc = nlp(text)
 
-doc= nlp(sample_text)
-character= set()
+# --------------------------------
+# 1. Count PERSON entities
+# --------------------------------
+
+character = Counter()
 
 for ent in doc.ents:
   if ent.label_ == "PERSON":
-    character.add(ent.text)
+    character[ent.text] += 1
 
-sorted_characters = sorted(character)
 
-for character in sorted_characters:
-  print(character)
+# --------------------------------
+# 2. Store 3 example contexts
+#    for each PERSON
+# --------------------------------
+
+character_context = {}
+
+for ent in doc.ents:
+  if ent.label_ == "PERSON":
+
+    if ent.text not in character_context:
+      character_context[ent.text] = []
+
+    if len(character_context[ent.text]) < 3:
+      character_context[ent.text].append(ent.sent.text)
+
+
+# --------------------------------
+# 3. Combine count + context
+# --------------------------------
+
+character_profiles = {}
+
+for name, count in character.most_common():
+    character_profiles[name] = {
+        "count": count,
+        "contexts": character_context.get(name, [])
+    }
+
+
+# --------------------------------
+# 4. Test
+# --------------------------------
+
+print("Holmes Profile:")
+print(character_profiles["Holmes"])
