@@ -28,8 +28,8 @@ LitMind is an AI-powered Novel Analyzer that uses Natural Language Processing (N
 
 Current Progress:
 
-* [ ] Project Setup
-* [ ] PDF Text Extraction
+* [x] Project Setup
+* [x] PDF Text Extraction
 * [ ] Character Extraction
 * [ ] Character Relationship Graph
 * [ ] Sentiment Analysis
