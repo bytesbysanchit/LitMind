@@ -130,7 +130,99 @@ ranked_characters = sorted(
 # 6. Display top candidates
 # --------------------------------
 
-print("\nTop Character Candidates:")
+# print("\nTop Character Candidates:")
 
-for name, profile in ranked_characters[:20]:
-  print(name, "->", profile["total_score"])
+# for name, profile in ranked_characters[:20]:
+#   print(name, "->", profile["total_score"])
+
+
+def is_name_variant(name1, name2):
+  words1= name1.split()
+  words2= name2.split()
+
+  if(len(words1)> len(words2)):
+    full_name = words1
+    short_name = words2
+  else:
+    full_name = words2
+    short_name = words1
+
+  return all(word in full_name for word in short_name)
+
+# print(is_name_variant("Sherlock Holmes", "Holmes"))
+# print(is_name_variant("John Watson", "Watson"))
+# print(is_name_variant("Sherlock Holmes", "Watson"))
+
+
+name_variants = {}
+
+names = list(character.keys())
+
+for i in range(len(names)):
+  for j in range(i + 1, len(names)):
+
+    name1 = names[i]
+    name2 = names[j]
+
+    if is_name_variant(name1, name2):
+
+      if len(name1.split()) >= len(name2.split()):
+        full_name = name1
+        short_name = name2
+      else:
+        full_name = name2
+        short_name = name1
+
+      if short_name not in name_variants:
+        name_variants[short_name] = []
+
+      name_variants[short_name].append(full_name)
+
+# for short_name, full_names in name_variants.items():
+#   print(short_name, "->", full_names)
+
+
+# for short_name, full_names in name_variants.items():
+
+#   print("\n", short_name)
+#   for full_name in full_names:
+#     print(
+#       "  ",
+#       full_name,
+#       "->",
+#       character[full_name]
+#     )
+
+
+# for short_name, full_names in name_variants.items():
+#   print(short_name, "->", len(full_names))
+
+alias_map = {}
+
+for short_name, full_names in name_variants.items():
+
+  frequencies = []
+
+  for full_name in full_names:
+    frequencies.append(character[full_name])
+
+  frequencies.sort(reverse=True)
+
+  best = frequencies[0]
+
+  if len(frequencies) > 1:
+    second_best = frequencies[1]
+  else:
+    second_best = 0
+
+  margin = best - second_best
+  if best >= 5 and margin >= 5:
+    # Best full-name candidate find karo
+      best_full_name = max(
+        full_names,
+        key=lambda name: character[name]
+      )
+      alias_map[short_name] = best_full_name
+
+for alias, canonical in alias_map.items():
+  print(alias, "->", canonical)
