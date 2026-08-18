@@ -197,6 +197,20 @@ for i in range(len(names)):
 # for short_name, full_names in name_variants.items():
 #   print(short_name, "->", len(full_names))
 
+titles = {
+  "Mr",
+  "Mrs",
+  "Miss",
+  "Ms",
+  "Dr",
+  "Lady",
+  "Sir"
+}
+
+def has_title(name):
+  first_word = name.split()[0]
+  return first_word in titles
+
 alias_map = {}
 
 for short_name, full_names in name_variants.items():
@@ -220,9 +234,22 @@ for short_name, full_names in name_variants.items():
     # Best full-name candidate find karo
       best_full_name = max(
         full_names,
-        key=lambda name: character[name]
+        key=lambda name: (
+          not has_title(name),
+          character[name]
+        )
       )
       alias_map[short_name] = best_full_name
 
 for alias, canonical in alias_map.items():
   print(alias, "->", canonical)
+
+
+# print("Miss Stoner:", "Miss Stoner".split()[0] in titles)
+# print("Helen Stoner:", "Helen Stoner".split()[0] in titles)
+# print("Sherlock Holmes:", "Sherlock Holmes".split()[0] in titles)
+
+
+# print(has_title("Miss Stoner"))
+# print(has_title("Helen Stoner"))
+# print(has_title("Sherlock Holmes"))
