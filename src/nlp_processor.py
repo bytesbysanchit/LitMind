@@ -3,26 +3,23 @@ from collections import Counter
 import spacy
 
 
-# Load spaCy English model
+# ============================================
+# 1. LOAD MODEL AND TEXT
+# ============================================
+
 nlp = spacy.load("en_core_web_sm")
 
-
-# Path of processed text
 text_path = Path("data/processed/Sherlock_Holmes.txt")
 
-
-# Read text file
 with open(text_path, "r", encoding="utf-8") as file:
   text = file.read()
 
-
-# Process the complete text
 doc = nlp(text)
 
 
-# --------------------------------
-# 1. Count PERSON entities
-# --------------------------------
+# ============================================
+# 2. EXTRACT PERSON ENTITIES
+# ============================================
 
 character = Counter()
 
@@ -31,26 +28,26 @@ for ent in doc.ents:
     character[ent.text] += 1
 
 
-# --------------------------------
-# 2. Store 3 example contexts
-#    for each PERSON
-# --------------------------------
+# ============================================
+# 3. STORE EXAMPLE CONTEXTS
+# ============================================
 
 character_context = {}
 
 for ent in doc.ents:
-  if ent.label_ == "PERSON":
+  if ent.label_ != "PERSON":
+    continue  
 
-    if ent.text not in character_context:
-      character_context[ent.text] = []
+  if ent.text not in character_context:
+    character_context[ent.text] = []
 
-    if len(character_context[ent.text]) < 3:
-      character_context[ent.text].append(ent.sent.text)
+  if len(character_context[ent.text]) < 3:
+    character_context[ent.text].append(ent.sent.text)
 
 
-# --------------------------------
-# 3. Count character-like contexts
-# --------------------------------
+# ============================================
+# 4. DETECT CHARACTER-LIKE CONTEXTS
+# ============================================
 
 character_verbs = {
   "say",
@@ -65,82 +62,24 @@ character_verbs = {
 context_scores = Counter()
 
 for ent in doc.ents:
-  if ent.label_ == "PERSON":
+  if ent.label_ != "PERSON":
+    continue
 
-    for token in ent.sent:
-      if token.lemma_.lower() in character_verbs:
-        context_scores[ent.text] += 1
-        break
-
-
-# --------------------------------
-# 4. Create character profiles
-# --------------------------------
-
-character_profiles = {}
-
-for name, count in character.most_common():
-
-  # Frequency score
-  if count >= 50:
-    frequency_score = 3
-  elif count >= 10:
-    frequency_score = 2
-  elif count >= 3:
-    frequency_score = 1
-  else:
-    frequency_score = 0
-
-  # Context score
-  context_count = context_scores.get(name, 0)
-
-  if context_count >= 50:
-    context_score = 3
-  elif context_count >= 10:
-    context_score = 2
-  elif context_count >= 3:
-    context_score = 1
-  else:
-    context_score = 0
-
-  # Total score
-  total_score = frequency_score + context_score
-
-  character_profiles[name] = {
-    "count": count,
-    "frequency_score": frequency_score,
-    "context_score": context_score,
-    "total_score": total_score,
-    "contexts": character_context.get(name, [])
-  }
+  for token in ent.sent:
+    if token.lemma_.lower() in character_verbs:
+      context_scores[ent.text] += 1
+      break
 
 
-# --------------------------------
-# 5. Rank character candidates
-# --------------------------------
-
-ranked_characters = sorted(
-  character_profiles.items(),
-  key=lambda x: x[1]["total_score"],
-  reverse=True
-)
-
-
-# --------------------------------
-# 6. Display top candidates
-# --------------------------------
-
-# print("\nTop Character Candidates:")
-
-# for name, profile in ranked_characters[:20]:
-#   print(name, "->", profile["total_score"])
-
+# ============================================
+# 5. DETECT NAME VARIANTS
+# ============================================
 
 def is_name_variant(name1, name2):
-  words1= name1.split()
-  words2= name2.split()
+  words1 = name1.split()
+  words2 = name2.split()
 
-  if(len(words1)> len(words2)):
+  if len(words1) >= len(words2):
     full_name = words1
     short_name = words2
   else:
@@ -148,10 +87,6 @@ def is_name_variant(name1, name2):
     short_name = words1
 
   return all(word in full_name for word in short_name)
-
-# print(is_name_variant("Sherlock Holmes", "Holmes"))
-# print(is_name_variant("John Watson", "Watson"))
-# print(is_name_variant("Sherlock Holmes", "Watson"))
 
 
 name_variants = {}
@@ -164,38 +99,25 @@ for i in range(len(names)):
     name1 = names[i]
     name2 = names[j]
 
-    if is_name_variant(name1, name2):
+    if not is_name_variant(name1, name2):
+      continue
 
-      if len(name1.split()) >= len(name2.split()):
-        full_name = name1
-        short_name = name2
-      else:
-        full_name = name2
-        short_name = name1
+    if len(name1.split()) >= len(name2.split()):
+      full_name = name1
+      short_name = name2
+    else:
+      full_name = name2
+      short_name = name1
 
-      if short_name not in name_variants:
-        name_variants[short_name] = []
+    if short_name not in name_variants:
+      name_variants[short_name] = []
 
-      name_variants[short_name].append(full_name)
-
-# for short_name, full_names in name_variants.items():
-#   print(short_name, "->", full_names)
+    name_variants[short_name].append(full_name)
 
 
-# for short_name, full_names in name_variants.items():
-
-#   print("\n", short_name)
-#   for full_name in full_names:
-#     print(
-#       "  ",
-#       full_name,
-#       "->",
-#       character[full_name]
-#     )
-
-
-# for short_name, full_names in name_variants.items():
-#   print(short_name, "->", len(full_names))
+# ============================================
+# 6. SELECT STRONG ALIAS CANDIDATES
+# ============================================
 
 titles = {
   "Mr",
@@ -204,21 +126,23 @@ titles = {
   "Ms",
   "Dr",
   "Lady",
-  "Sir"
+  "Sir",
 }
+
 
 def has_title(name):
   first_word = name.split()[0]
   return first_word in titles
 
+
 alias_map = {}
 
 for short_name, full_names in name_variants.items():
 
-  frequencies = []
-
-  for full_name in full_names:
-    frequencies.append(character[full_name])
+  frequencies = [
+    character[full_name]
+    for full_name in full_names
+  ]
 
   frequencies.sort(reverse=True)
 
@@ -230,26 +154,172 @@ for short_name, full_names in name_variants.items():
     second_best = 0
 
   margin = best - second_best
+
   if best >= 5 and margin >= 5:
-    # Best full-name candidate find karo
-      best_full_name = max(
-        full_names,
-        key=lambda name: (
-          not has_title(name),
-          character[name]
-        )
+
+    best_full_name = max(
+      full_names,
+      key=lambda name: (
+        not has_title(name),
+        character[name]
       )
-      alias_map[short_name] = best_full_name
+    )
 
+    alias_map[short_name] = best_full_name
+
+
+# ============================================
+# 7. CREATE CANONICAL NAME LOOKUP
+# ============================================
+
+canonical_lookup = {}
+
+# Canonical names map to themselves
+for name in character:
+  canonical_lookup[name] = name
+
+# Aliases map to canonical names
 for alias, canonical in alias_map.items():
-  print(alias, "->", canonical)
+  canonical_lookup[alias] = canonical
 
 
-# print("Miss Stoner:", "Miss Stoner".split()[0] in titles)
-# print("Helen Stoner:", "Helen Stoner".split()[0] in titles)
-# print("Sherlock Holmes:", "Sherlock Holmes".split()[0] in titles)
+# ============================================
+# 8. MERGE CHARACTER FREQUENCIES
+# ============================================
+
+merged_frequency = Counter()
+
+for ent in doc.ents:
+
+  if ent.label_ != "PERSON":
+    continue
+
+  canonical = canonical_lookup.get(ent.text)
+
+  if canonical:
+    merged_frequency[canonical] += 1
 
 
-# print(has_title("Miss Stoner"))
-# print(has_title("Helen Stoner"))
-# print(has_title("Sherlock Holmes"))
+# ============================================
+# 9. MERGE CHARACTER CONTEXTS
+# ============================================
+
+merged_contexts = {}
+
+for ent in doc.ents:
+
+  if ent.label_ != "PERSON":
+    continue
+
+  canonical = canonical_lookup.get(ent.text)
+
+  if not canonical:
+    continue
+
+  if canonical not in merged_contexts:
+    merged_contexts[canonical] = []
+
+  if len(merged_contexts[canonical]) < 5:
+    if ent.sent.text not in merged_contexts[canonical]:
+      merged_contexts[canonical].append(ent.sent.text)
+
+
+# ============================================
+# 10. MERGE CONTEXT SCORES
+# ============================================
+
+merged_context_scores = Counter()
+
+for ent in doc.ents:
+
+  if ent.label_ != "PERSON":
+    continue
+
+  canonical = canonical_lookup.get(ent.text)
+
+  if not canonical:
+    continue
+
+  for token in ent.sent:
+
+    if token.lemma_.lower() in character_verbs:
+      merged_context_scores[canonical] += 1
+      break
+
+
+# ============================================
+# 11. CREATE FINAL CHARACTER PROFILES
+# ============================================
+
+character_profiles = {}
+
+for canonical, frequency in merged_frequency.most_common():
+
+  # Frequency score
+  if frequency >= 50:
+    frequency_score = 3
+  elif frequency >= 10:
+    frequency_score = 2
+  elif frequency >= 3:
+    frequency_score = 1
+  else:
+    frequency_score = 0
+
+  # Context score
+  context_count = merged_context_scores.get(canonical, 0)
+
+  if context_count >= 5:
+    context_score = 3
+  elif context_count >= 3:
+    context_score = 2
+  elif context_count >= 1:
+    context_score = 1
+  else:
+    context_score = 0
+
+  # Find aliases
+  aliases = [
+    alias
+    for alias, name in alias_map.items()
+    if name == canonical
+  ]
+
+  total_score = frequency_score + context_score
+
+  character_profiles[canonical] = {
+    "frequency": frequency,
+    "aliases": aliases,
+    "contexts": merged_contexts.get(canonical, []),
+    "frequency_score": frequency_score,
+    "context_score": context_score,
+    "total_score": total_score,
+  }
+
+
+# ============================================
+# 12. RANK CHARACTERS
+# ============================================
+
+ranked_characters = sorted(
+  character_profiles.items(),
+  key=lambda x: x[1]["total_score"],
+  reverse=True
+)
+
+
+# ============================================
+# 13. FINAL OUTPUT
+# ============================================
+
+print("\nTop Character Candidates:\n")
+
+for rank, (name, profile) in enumerate(
+  ranked_characters[:20],
+  start=1
+):
+  print(
+    f"{rank}. {name}"
+    f" | Score: {profile['total_score']}"
+    f" | Frequency: {profile['frequency']}"
+    f" | Aliases: {profile['aliases']}"
+  )
