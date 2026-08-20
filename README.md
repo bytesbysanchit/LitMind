@@ -30,7 +30,7 @@ Current Progress:
 
 * [x] Project Setup
 * [x] PDF Text Extraction
-* [ ] Character Extraction
+* [x] Character Extraction
 * [ ] Character Relationship Graph
 * [ ] Sentiment Analysis
 * [ ] AI Summary
