@@ -311,15 +311,90 @@ ranked_characters = sorted(
 # 13. FINAL OUTPUT
 # ============================================
 
-print("\nTop Character Candidates:\n")
+# print("\nTop Character Candidates:\n")
 
-for rank, (name, profile) in enumerate(
-  ranked_characters[:20],
-  start=1
-):
+# for rank, (name, profile) in enumerate(
+#   ranked_characters[:20],
+#   start=1
+# ):
+#   print(
+#     f"{rank}. {name}"
+#     f" | Score: {profile['total_score']}"
+#     f" | Frequency: {profile['frequency']}"
+#     f" | Aliases: {profile['aliases']}"
+#   )
+
+
+# ============================================
+# 14. SELECT VALID CHARACTER NODES
+# ============================================
+
+valid_characters = set()
+
+# for name, profile in character_profiles.items():
+
+  # Character should have either:
+  # strong frequency evidence
+  # OR strong contextual evidence
+
+
+print("\nValid Characters:")
+
+for name in sorted(valid_characters):
+  print(name)
+
+#
+
+sentence_characters = []
+
+for sent in doc.sents:
+
+  persons = set()
+
+  for ent in sent.ents:
+    if ent.label_ != "PERSON":
+      continue
+
+    canonical = canonical_lookup.get(ent.text)
+
+    if canonical and canonical in valid_characters:
+      persons.add(canonical)
+
+  if len(persons) >= 2:
+    sentence_characters.append(persons)
+
+# print("\nCharacter pairs by sentence:")
+
+# for persons in sentence_characters[:20]:
+#   print(persons)
+
+from itertools import combinations
+
+pair_counts = Counter()
+
+for persons in sentence_characters:
+
+  canonical_persons = set()
+
+  for person in persons:
+    canonical = canonical_lookup.get(person)
+
+    if canonical:
+      canonical_persons.add(canonical)
+
+  for person1, person2 in combinations(
+    sorted(canonical_persons), 2
+  ):
+    pair_counts[(person1, person2)] += 1
+
+
+print("\nTop Character Pairs:")
+
+for (person1, person2), count in pair_counts.most_common(20):
   print(
-    f"{rank}. {name}"
-    f" | Score: {profile['total_score']}"
-    f" | Frequency: {profile['frequency']}"
-    f" | Aliases: {profile['aliases']}"
+    person1,
+    "<->",
+    person2,
+    "->",
+    count
   )
