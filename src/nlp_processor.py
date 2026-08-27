@@ -70,21 +70,43 @@ for ent in doc.ents:
       context_scores[ent.text] += 1
       break
 
+titles = {
+  "Mr",
+  "Mrs",
+  "Miss",
+  "Ms",
+  "Dr",
+  "Lady",
+  "Sir",
+}
+
 
 # ============================================
 # 5. DETECT NAME VARIANTS
 # ============================================
 
 def is_name_variant(name1, name2):
+
   words1 = name1.split()
   words2 = name2.split()
 
-  if len(words1) >= len(words2):
-    full_name = words1
-    short_name = words2
+  # Remove titles before comparison
+  words1_without_title = [
+    word for word in words1
+    if word not in titles
+  ]
+
+  words2_without_title = [
+    word for word in words2
+    if word not in titles
+  ]
+
+  if len(words1_without_title) >= len(words2_without_title):
+    full_name = words1_without_title
+    short_name = words2_without_title
   else:
-    full_name = words2
-    short_name = words1
+    full_name = words2_without_title
+    short_name = words1_without_title
 
   return all(word in full_name for word in short_name)
 
@@ -119,53 +141,58 @@ for i in range(len(names)):
 # 6. SELECT STRONG ALIAS CANDIDATES
 # ============================================
 
-titles = {
-  "Mr",
-  "Mrs",
-  "Miss",
-  "Ms",
-  "Dr",
-  "Lady",
-  "Sir",
-}
-
 
 def has_title(name):
   first_word = name.split()[0]
   return first_word in titles
 
-
 alias_map = {}
 
 for short_name, full_names in name_variants.items():
 
-  frequencies = [
-    character[full_name]
-    for full_name in full_names
+  # Prefer names without titles
+  non_title_names = [
+    name for name in full_names
+    if not has_title(name)
   ]
 
-  frequencies.sort(reverse=True)
+  # If a non-title full name exists, prefer it
+  if non_title_names:
 
-  best = frequencies[0]
+    best_full_name = max(
+      non_title_names,
+      key=lambda name: character[name]
+    )
 
-  if len(frequencies) > 1:
-    second_best = frequencies[1]
   else:
-    second_best = 0
-
-  margin = best - second_best
-
-  if best >= 5 and margin >= 5:
 
     best_full_name = max(
       full_names,
-      key=lambda name: (
-        not has_title(name),
-        character[name]
-      )
+      key=lambda name: character[name]
     )
 
+  # Only create an alias when the selected
+  # canonical name has enough evidence
+  total_frequency = sum(
+    character[name]
+    for name in full_names
+  )
+
+  if total_frequency >= 5:
     alias_map[short_name] = best_full_name
+
+# Add title-based variants
+for short_name, full_names in name_variants.items():
+
+  if short_name not in alias_map:
+    continue
+
+  canonical = alias_map[short_name]
+
+  for name in full_names:
+
+    if has_title(name):
+      alias_map[name] = canonical
 
 
 # ============================================
@@ -338,10 +365,10 @@ valid_characters = set()
   # OR strong contextual evidence
 
 
-print("\nValid Characters:")
+# print("\nValid Characters:")
 
-for name in sorted(valid_characters):
-  print(name)
+# for name in sorted(valid_characters):
+#   print(name)
 
 #
 
@@ -363,10 +390,10 @@ for sent in doc.sents:
   if len(persons) >= 2:
     sentence_characters.append(persons)
 
-# print("\nCharacter pairs by sentence:")
+print("\nCharacter pairs by sentence:")
 
-# for persons in sentence_characters[:20]:
-#   print(persons)
+for persons in sentence_characters[:20]:
+  print(persons)
 
 from itertools import combinations
 
