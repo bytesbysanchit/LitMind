@@ -3,6 +3,7 @@ from collections import Counter
 from itertools import combinations
 
 import spacy
+import networkx as nx;
 
 
 # ============================================
@@ -341,7 +342,7 @@ strong_pairs = Counter({
 # 14. FINAL OUTPUT
 # ============================================
 
-print("\nTop Character Candidates:\n")
+# print("\nTop Character Candidates:\n")
 
 ranked_characters = sorted(
   character_profiles.items(),
@@ -361,9 +362,37 @@ for rank, (name, profile) in enumerate(
   )
 
 
-print("\nStrong Character Pairs:\n")
+# print("\nStrong Character Pairs:\n")
 
-for (person1, person2), count in strong_pairs.most_common(20):
+# for (person1, person2), count in strong_pairs.most_common(20):
+#   print(
+#     f"{person1} <-> {person2} -> {count}"
+#   )
+
+
+# ============================================
+# 15. CREATE CHARACTER GRAPH
+# ============================================
+
+graph= nx.Graph()
+
+for (person1, person2), count in strong_pairs.items():
+  graph.add_edge(
+    person1,
+    person2,
+    weight=count
+  )
+
+print("\nNumber of Nodes:", graph.number_of_nodes())
+print("Number of Edges:", graph.number_of_edges())
+
+print("\nGraph Edges:")
+
+for person1, person2, data in graph.edges(data=True):
   print(
-    f"{person1} <-> {person2} -> {count}"
+    person1,
+    "<->",
+    person2,
+    "| weight:",
+    data["weight"]
   )
