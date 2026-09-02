@@ -3,7 +3,8 @@ from collections import Counter
 from itertools import combinations
 
 import spacy
-import networkx as nx;
+import networkx as nx
+import matplotlib.pyplot as plt
 
 
 # ============================================
@@ -350,16 +351,16 @@ ranked_characters = sorted(
   reverse=True
 )
 
-for rank, (name, profile) in enumerate(
-  ranked_characters[:20],
-  start=1
-):
-  print(
-    f"{rank}. {name}"
-    f" | Score: {profile['total_score']}"
-    f" | Frequency: {profile['frequency']}"
-    f" | Aliases: {profile['aliases']}"
-  )
+# for rank, (name, profile) in enumerate(
+#   ranked_characters[:20],
+#   start=1
+# ):
+#   print(
+#     f"{rank}. {name}"
+#     f" | Score: {profile['total_score']}"
+#     f" | Frequency: {profile['frequency']}"
+#     f" | Aliases: {profile['aliases']}"
+#   )
 
 
 # print("\nStrong Character Pairs:\n")
@@ -383,16 +384,57 @@ for (person1, person2), count in strong_pairs.items():
     weight=count
   )
 
-print("\nNumber of Nodes:", graph.number_of_nodes())
-print("Number of Edges:", graph.number_of_edges())
+# print("\nNumber of Nodes:", graph.number_of_nodes())
+# print("Number of Edges:", graph.number_of_edges())
 
-print("\nGraph Edges:")
+# print("\nGraph Edges:")
 
-for person1, person2, data in graph.edges(data=True):
-  print(
-    person1,
-    "<->",
-    person2,
-    "| weight:",
-    data["weight"]
-  )
+# for person1, person2, data in graph.edges(data=True):
+#   print(
+#     person1,
+#     "<->",
+#     person2,
+#     "| weight:",
+#     data["weight"]
+#   )
+
+
+plt.figure(figsize=(12, 8))
+
+pos = nx.spring_layout(graph)
+
+edge_widths = [
+  graph[person1][person2]["weight"]
+  for person1, person2 in graph.edges()
+]
+
+nx.draw(
+  graph,
+  pos,
+  with_labels=True,
+  width=edge_widths
+)
+
+# plt.show()
+
+print("\nCharacter Degrees:\n")
+
+degrees = dict(graph.degree())
+
+for name, degree in sorted(
+  degrees.items(),
+  key=lambda x: x[1],
+  reverse=True
+):
+  print(name, "->", degree)
+
+print("\nWeighted Character Degrees:\n")
+
+weighted_degrees = dict(graph.degree(weight="weight"))
+
+for name, degree in sorted(
+  weighted_degrees.items(),
+  key=lambda x: x[1],
+  reverse=True
+):
+  print(name, "->", degree)
