@@ -97,12 +97,14 @@ def has_title(name):
 
 def is_name_variant(name1, name2):
   words1 = [
-    word for word in name1.split()
+    word
+    for word in name1.split()
     if word not in titles
   ]
 
   words2 = [
-    word for word in name2.split()
+    word
+    for word in name2.split()
     if word not in titles
   ]
 
@@ -113,15 +115,18 @@ def is_name_variant(name1, name2):
     full_name = words2
     short_name = words1
 
-  return all(word in full_name for word in short_name)
+  return all(
+    word in full_name
+    for word in short_name
+  )
 
 
 name_variants = {}
-
 names = list(character.keys())
 
 for i in range(len(names)):
   for j in range(i + 1, len(names)):
+
     name1 = names[i]
     name2 = names[j]
 
@@ -135,7 +140,10 @@ for i in range(len(names)):
       full_name = name2
       short_name = name1
 
-    name_variants.setdefault(short_name, []).append(full_name)
+    name_variants.setdefault(
+      short_name,
+      []
+    ).append(full_name)
 
 
 # ============================================
@@ -147,7 +155,8 @@ alias_map = {}
 for short_name, full_names in name_variants.items():
 
   non_title_names = [
-    name for name in full_names
+    name
+    for name in full_names
     if not has_title(name)
   ]
 
@@ -168,6 +177,7 @@ for short_name, full_names in name_variants.items():
 
 
 # Add title-based variants
+
 for short_name, full_names in name_variants.items():
 
   if short_name not in alias_map:
@@ -222,7 +232,9 @@ for ent in doc.ents:
     len(merged_contexts[canonical]) < 5
     and ent.sent.text not in merged_contexts[canonical]
   ):
-    merged_contexts[canonical].append(ent.sent.text)
+    merged_contexts[canonical].append(
+      ent.sent.text
+    )
 
   # Context score
   for token in ent.sent:
@@ -250,7 +262,10 @@ for canonical, frequency in merged_frequency.most_common():
     frequency_score = 0
 
   # Context score
-  context_count = merged_context_scores.get(canonical, 0)
+  context_count = merged_context_scores.get(
+    canonical,
+    0
+  )
 
   if context_count >= 5:
     context_score = 3
@@ -267,12 +282,17 @@ for canonical, frequency in merged_frequency.most_common():
     if name == canonical
   ]
 
-  total_score = frequency_score + context_score
+  total_score = (
+    frequency_score + context_score
+  )
 
   character_profiles[canonical] = {
     "frequency": frequency,
     "aliases": aliases,
-    "contexts": merged_contexts.get(canonical, []),
+    "contexts": merged_contexts.get(
+      canonical,
+      []
+    ),
     "frequency_score": frequency_score,
     "context_score": context_score,
     "total_score": total_score,
@@ -307,7 +327,10 @@ for sent in doc.sents:
 
     canonical = canonical_lookup.get(ent.text)
 
-    if canonical and canonical in valid_characters:
+    if (
+      canonical
+      and canonical in valid_characters
+    ):
       persons.add(canonical)
 
   if len(persons) >= 2:
@@ -323,9 +346,12 @@ pair_counts = Counter()
 for persons in sentence_characters:
 
   for person1, person2 in combinations(
-    sorted(persons), 2
+    sorted(persons),
+    2
   ):
-    pair_counts[(person1, person2)] += 1
+    pair_counts[
+      (person1, person2)
+    ] += 1
 
 
 # ============================================
@@ -340,64 +366,23 @@ strong_pairs = Counter({
 
 
 # ============================================
-# 14. FINAL OUTPUT
+# 14. CREATE CHARACTER GRAPH
 # ============================================
 
-# print("\nTop Character Candidates:\n")
-
-ranked_characters = sorted(
-  character_profiles.items(),
-  key=lambda x: x[1]["total_score"],
-  reverse=True
-)
-
-# for rank, (name, profile) in enumerate(
-#   ranked_characters[:20],
-#   start=1
-# ):
-#   print(
-#     f"{rank}. {name}"
-#     f" | Score: {profile['total_score']}"
-#     f" | Frequency: {profile['frequency']}"
-#     f" | Aliases: {profile['aliases']}"
-#   )
-
-
-# print("\nStrong Character Pairs:\n")
-
-# for (person1, person2), count in strong_pairs.most_common(20):
-#   print(
-#     f"{person1} <-> {person2} -> {count}"
-#   )
-
-
-# ============================================
-# 15. CREATE CHARACTER GRAPH
-# ============================================
-
-graph= nx.Graph()
+graph = nx.Graph()
 
 for (person1, person2), count in strong_pairs.items():
+
   graph.add_edge(
     person1,
     person2,
     weight=count
   )
 
-# print("\nNumber of Nodes:", graph.number_of_nodes())
-# print("Number of Edges:", graph.number_of_edges())
 
-# print("\nGraph Edges:")
-
-# for person1, person2, data in graph.edges(data=True):
-#   print(
-#     person1,
-#     "<->",
-#     person2,
-#     "| weight:",
-#     data["weight"]
-#   )
-
+# ============================================
+# 15. VISUALIZE CHARACTER GRAPH
+# ============================================
 
 plt.figure(figsize=(12, 8))
 
@@ -417,6 +402,11 @@ nx.draw(
 
 # plt.show()
 
+
+# ============================================
+# 16. CHARACTER DEGREE
+# ============================================
+
 print("\nCharacter Degrees:\n")
 
 degrees = dict(graph.degree())
@@ -428,9 +418,16 @@ for name, degree in sorted(
 ):
   print(name, "->", degree)
 
+
+# ============================================
+# 17. WEIGHTED CHARACTER DEGREE
+# ============================================
+
 print("\nWeighted Character Degrees:\n")
 
-weighted_degrees = dict(graph.degree(weight="weight"))
+weighted_degrees = dict(
+  graph.degree(weight="weight")
+)
 
 for name, degree in sorted(
   weighted_degrees.items(),
@@ -438,6 +435,11 @@ for name, degree in sorted(
   reverse=True
 ):
   print(name, "->", degree)
+
+
+# ============================================
+# 18. DEGREE CENTRALITY
+# ============================================
 
 print("\nDegree Centrality:\n")
 
@@ -448,15 +450,30 @@ for name, score in sorted(
   key=lambda x: x[1],
   reverse=True
 ):
-  print(name, "->", round(score, 3))
+  print(
+    name,
+    "->",
+    round(score, 3)
+  )
+
+
+# ============================================
+# 19. BETWEENNESS CENTRALITY
+# ============================================
 
 print("\nBetweenness Centrality:\n")
 
-betweenness_centrality = nx.betweenness_centrality(graph)
+betweenness_centrality = (
+  nx.betweenness_centrality(graph)
+)
 
 for name, score in sorted(
   betweenness_centrality.items(),
   key=lambda x: x[1],
   reverse=True
 ):
-  print(name, "->", round(score, 3))
+  print(
+    name,
+    "->",
+    round(score, 3)
+  )
