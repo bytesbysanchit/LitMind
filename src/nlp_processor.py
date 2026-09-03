@@ -438,3 +438,25 @@ for name, degree in sorted(
   reverse=True
 ):
   print(name, "->", degree)
+
+print("\nDegree Centrality:\n")
+
+degree_centrality = nx.degree_centrality(graph)
+
+for name, score in sorted(
+  degree_centrality.items(),
+  key=lambda x: x[1],
+  reverse=True
+):
+  print(name, "->", round(score, 3))
+
+print("\nBetweenness Centrality:\n")
+
+betweenness_centrality = nx.betweenness_centrality(graph)
+
+for name, score in sorted(
+  betweenness_centrality.items(),
+  key=lambda x: x[1],
+  reverse=True
+):
+  print(name, "->", round(score, 3))
