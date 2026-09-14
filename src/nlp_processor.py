@@ -11,6 +11,10 @@ import matplotlib.pyplot as plt
 # 1. LOAD MODEL AND TEXT
 # ============================================
 
+print("\n" + "=" * 60)
+print("LITMIND - CHARACTER NETWORK PROTOTYPE")
+print("=" * 60)
+
 nlp = spacy.load("en_core_web_sm")
 
 text_path = Path("data/processed/Sherlock_Holmes.txt")
@@ -19,6 +23,9 @@ with open(text_path, "r", encoding="utf-8") as file:
   text = file.read()
 
 doc = nlp(text)
+
+print("\nInput Text:", text_path.name)
+print("Text Processing: Complete")
 
 
 # ============================================
@@ -30,6 +37,18 @@ character = Counter()
 for ent in doc.ents:
   if ent.label_ == "PERSON":
     character[ent.text] += 1
+
+print("\n" + "-" * 60)
+print("1. CHARACTER EXTRACTION")
+print("-" * 60)
+
+print("Total PERSON entities:", sum(character.values()))
+print("Unique PERSON mentions:", len(character))
+
+print("\nTop Character Mentions:")
+
+for name, frequency in character.most_common(10):
+  print(name, "->", frequency)
 
 
 # ============================================
@@ -203,6 +222,18 @@ for alias, canonical in alias_map.items():
   canonical_lookup[alias] = canonical
 
 
+print("\n" + "-" * 60)
+print("2. NAME / ALIAS NORMALIZATION")
+print("-" * 60)
+
+print("Detected aliases:", len(alias_map))
+
+print("\nExample Alias Mappings:")
+
+for alias, canonical in list(alias_map.items())[:10]:
+  print(alias, "->", canonical)
+
+
 # ============================================
 # 8. MERGE CHARACTER DATA
 # ============================================
@@ -309,6 +340,33 @@ valid_characters = {
   if profile["total_score"] >= 3
 }
 
+print("\n" + "-" * 60)
+print("3. CHARACTER CANDIDATE IDENTIFICATION")
+print("-" * 60)
+
+print(
+  "Valid character candidates:",
+  len(valid_characters)
+)
+
+print("\nTop Character Candidates:")
+
+ranked_characters = sorted(
+  character_profiles.items(),
+  key=lambda x: x[1]["total_score"],
+  reverse=True
+)
+
+for rank, (name, profile) in enumerate(
+  ranked_characters[:10],
+  start=1
+):
+  print(
+    f"{rank}. {name}"
+    f" | Frequency: {profile['frequency']}"
+    f" | Score: {profile['total_score']}"
+  )
+
 
 # ============================================
 # 11. FIND CHARACTER CO-OCCURRENCE
@@ -380,13 +438,34 @@ for (person1, person2), count in strong_pairs.items():
   )
 
 
+print("\n" + "-" * 60)
+print("4. CHARACTER CO-OCCURRENCE GRAPH")
+print("-" * 60)
+
+print("Graph Nodes:", graph.number_of_nodes())
+print("Graph Edges:", graph.number_of_edges())
+
+print("\nStrong Character Connections:")
+
+for (person1, person2), count in strong_pairs.most_common(10):
+  print(
+    f"{person1} <-> {person2}"
+    f" | Strength: {count}"
+  )
+
+
 # ============================================
 # 15. VISUALIZE CHARACTER GRAPH
 # ============================================
 
-plt.figure(figsize=(12, 8))
+plt.figure(figsize=(14, 10))
 
-pos = nx.spring_layout(graph)
+pos = nx.spring_layout(
+  graph,
+  k=1.2,
+  iterations=100,
+  seed=42
+)
 
 edge_widths = [
   graph[person1][person2]["weight"]
@@ -397,17 +476,27 @@ nx.draw(
   graph,
   pos,
   with_labels=True,
-  width=edge_widths
+  width=edge_widths,
+  node_size=1400,
+  font_size=9
 )
 
-# plt.show()
+plt.title(
+  "LitMind - Character Co-occurrence Graph",
+  fontsize=16
+)
+
+plt.tight_layout()
+plt.show()
 
 
 # ============================================
 # 16. CHARACTER DEGREE
 # ============================================
 
-print("\nCharacter Degrees:\n")
+print("\n" + "-" * 60)
+print("5. GRAPH ANALYSIS - DEGREE")
+print("-" * 60)
 
 degrees = dict(graph.degree())
 
@@ -423,7 +512,9 @@ for name, degree in sorted(
 # 17. WEIGHTED CHARACTER DEGREE
 # ============================================
 
-print("\nWeighted Character Degrees:\n")
+print("\n" + "-" * 60)
+print("6. GRAPH ANALYSIS - WEIGHTED DEGREE")
+print("-" * 60)
 
 weighted_degrees = dict(
   graph.degree(weight="weight")
@@ -441,7 +532,9 @@ for name, degree in sorted(
 # 18. DEGREE CENTRALITY
 # ============================================
 
-print("\nDegree Centrality:\n")
+print("\n" + "-" * 60)
+print("7. GRAPH ANALYSIS - DEGREE CENTRALITY")
+print("-" * 60)
 
 degree_centrality = nx.degree_centrality(graph)
 
@@ -461,7 +554,9 @@ for name, score in sorted(
 # 19. BETWEENNESS CENTRALITY
 # ============================================
 
-print("\nBetweenness Centrality:\n")
+print("\n" + "-" * 60)
+print("8. GRAPH ANALYSIS - BETWEENNESS CENTRALITY")
+print("-" * 60)
 
 betweenness_centrality = (
   nx.betweenness_centrality(graph)
@@ -477,3 +572,12 @@ for name, score in sorted(
     "->",
     round(score, 3)
   )
+
+
+# ============================================
+# END
+# ============================================
+
+print("\n" + "=" * 60)
+print("LITMIND PROTOTYPE RUN COMPLETE")
+print("=" * 60)
