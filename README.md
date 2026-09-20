@@ -51,4 +51,3 @@ This project is being developed incrementally with a focus on:
 
 * Sanchit Agrawal
 * Amrit Kumar Yadav
-
