@@ -11,10 +11,6 @@ import matplotlib.pyplot as plt
 # 1. LOAD MODEL AND TEXT
 # ============================================
 
-print("\n" + "=" * 60)
-print("LITMIND - CHARACTER NETWORK PROTOTYPE")
-print("=" * 60)
-
 nlp = spacy.load("en_core_web_sm")
 
 text_path = Path("data/processed/Sherlock_Holmes.txt")
@@ -23,9 +19,6 @@ with open(text_path, "r", encoding="utf-8") as file:
   text = file.read()
 
 doc = nlp(text)
-
-print("\nInput Text:", text_path.name)
-print("Text Processing: Complete")
 
 
 # ============================================
@@ -38,18 +31,6 @@ for ent in doc.ents:
   if ent.label_ == "PERSON":
     character[ent.text] += 1
 
-print("\n" + "-" * 60)
-print("1. CHARACTER EXTRACTION")
-print("-" * 60)
-
-print("Total PERSON entities:", sum(character.values()))
-print("Unique PERSON mentions:", len(character))
-
-print("\nTop Character Mentions:")
-
-for name, frequency in character.most_common(10):
-  print(name, "->", frequency)
-
 
 # ============================================
 # 3. STORE EXAMPLE CONTEXTS
@@ -58,6 +39,7 @@ for name, frequency in character.most_common(10):
 character_context = {}
 
 for ent in doc.ents:
+
   if ent.label_ != "PERSON":
     continue
 
@@ -65,7 +47,9 @@ for ent in doc.ents:
     character_context[ent.text] = []
 
   if len(character_context[ent.text]) < 3:
-    character_context[ent.text].append(ent.sent.text)
+    character_context[ent.text].append(
+      ent.sent.text
+    )
 
 
 # ============================================
@@ -85,10 +69,12 @@ character_verbs = {
 context_scores = Counter()
 
 for ent in doc.ents:
+
   if ent.label_ != "PERSON":
     continue
 
   for token in ent.sent:
+
     if token.lemma_.lower() in character_verbs:
       context_scores[ent.text] += 1
       break
@@ -115,6 +101,7 @@ def has_title(name):
 
 
 def is_name_variant(name1, name2):
+
   words1 = [
     word
     for word in name1.split()
@@ -144,6 +131,7 @@ name_variants = {}
 names = list(character.keys())
 
 for i in range(len(names)):
+
   for j in range(i + 1, len(names)):
 
     name1 = names[i]
@@ -205,6 +193,7 @@ for short_name, full_names in name_variants.items():
   canonical = alias_map[short_name]
 
   for name in full_names:
+
     if has_title(name):
       alias_map[name] = canonical
 
@@ -220,18 +209,6 @@ canonical_lookup = {
 
 for alias, canonical in alias_map.items():
   canonical_lookup[alias] = canonical
-
-
-print("\n" + "-" * 60)
-print("2. NAME / ALIAS NORMALIZATION")
-print("-" * 60)
-
-print("Detected aliases:", len(alias_map))
-
-print("\nExample Alias Mappings:")
-
-for alias, canonical in list(alias_map.items())[:10]:
-  print(alias, "->", canonical)
 
 
 # ============================================
@@ -269,6 +246,7 @@ for ent in doc.ents:
 
   # Context score
   for token in ent.sent:
+
     if token.lemma_.lower() in character_verbs:
       merged_context_scores[canonical] += 1
       break
@@ -285,12 +263,16 @@ for canonical, frequency in merged_frequency.most_common():
   # Frequency score
   if frequency >= 50:
     frequency_score = 3
+
   elif frequency >= 10:
     frequency_score = 2
+
   elif frequency >= 3:
     frequency_score = 1
+
   else:
     frequency_score = 0
+
 
   # Context score
   context_count = merged_context_scores.get(
@@ -300,12 +282,16 @@ for canonical, frequency in merged_frequency.most_common():
 
   if context_count >= 5:
     context_score = 3
+
   elif context_count >= 3:
     context_score = 2
+
   elif context_count >= 1:
     context_score = 1
+
   else:
     context_score = 0
+
 
   aliases = [
     alias
@@ -340,33 +326,6 @@ valid_characters = {
   if profile["total_score"] >= 3
 }
 
-print("\n" + "-" * 60)
-print("3. CHARACTER CANDIDATE IDENTIFICATION")
-print("-" * 60)
-
-print(
-  "Valid character candidates:",
-  len(valid_characters)
-)
-
-print("\nTop Character Candidates:")
-
-ranked_characters = sorted(
-  character_profiles.items(),
-  key=lambda x: x[1]["total_score"],
-  reverse=True
-)
-
-for rank, (name, profile) in enumerate(
-  ranked_characters[:10],
-  start=1
-):
-  print(
-    f"{rank}. {name}"
-    f" | Frequency: {profile['frequency']}"
-    f" | Score: {profile['total_score']}"
-  )
-
 
 # ============================================
 # 11. FIND CHARACTER CO-OCCURRENCE
@@ -392,7 +351,13 @@ for sent in doc.sents:
       persons.add(canonical)
 
   if len(persons) >= 2:
-    sentence_characters.append(persons)
+
+    sentence_characters.append(
+      (
+        sent.text.strip(),
+        persons
+      )
+    )
 
 
 # ============================================
@@ -401,12 +366,13 @@ for sent in doc.sents:
 
 pair_counts = Counter()
 
-for persons in sentence_characters:
+for sentence, persons in sentence_characters:
 
   for person1, person2 in combinations(
     sorted(persons),
     2
   ):
+
     pair_counts[
       (person1, person2)
     ] += 1
@@ -424,7 +390,50 @@ strong_pairs = Counter({
 
 
 # ============================================
-# 14. CREATE CHARACTER GRAPH
+# 14. RELATIONSHIP CONTEXT EXTRACTION
+# ============================================
+
+pair_contexts = {
+  pair: []
+  for pair in strong_pairs
+}
+
+for sentence, persons in sentence_characters:
+
+  for pair in strong_pairs:
+
+    person1, person2 = pair
+
+    if (
+      person1 in persons
+      and person2 in persons
+    ):
+
+      pair_contexts[pair].append(
+        sentence
+      )
+
+
+# ============================================
+# DISPLAY RELATIONSHIP CONTEXTS
+# ============================================
+
+print("\n" + "=" * 60)
+print("RELATIONSHIP CONTEXTS")
+print("=" * 60)
+
+for pair, contexts in pair_contexts.items():
+
+  print(
+    f"\n{pair[0]} ↔ {pair[1]}"
+  )
+
+  for context in contexts:
+    print(f"- {context}")
+
+
+# ============================================
+# 15. CREATE CHARACTER GRAPH
 # ============================================
 
 graph = nx.Graph()
@@ -438,16 +447,28 @@ for (person1, person2), count in strong_pairs.items():
   )
 
 
+# ============================================
+# DISPLAY GRAPH INFORMATION
+# ============================================
+
 print("\n" + "-" * 60)
-print("4. CHARACTER CO-OCCURRENCE GRAPH")
+print("CHARACTER CO-OCCURRENCE GRAPH")
 print("-" * 60)
 
-print("Graph Nodes:", graph.number_of_nodes())
-print("Graph Edges:", graph.number_of_edges())
+print(
+  "Graph Nodes:",
+  graph.number_of_nodes()
+)
+
+print(
+  "Graph Edges:",
+  graph.number_of_edges()
+)
 
 print("\nStrong Character Connections:")
 
 for (person1, person2), count in strong_pairs.most_common(10):
+
   print(
     f"{person1} <-> {person2}"
     f" | Strength: {count}"
@@ -455,7 +476,7 @@ for (person1, person2), count in strong_pairs.most_common(10):
 
 
 # ============================================
-# 15. VISUALIZE CHARACTER GRAPH
+# 16. VISUALIZE CHARACTER GRAPH
 # ============================================
 
 plt.figure(figsize=(14, 10))
@@ -486,98 +507,102 @@ plt.title(
   fontsize=16
 )
 
-plt.tight_layout()
 plt.show()
 
 
-# ============================================
-# 16. CHARACTER DEGREE
-# ============================================
+# # ============================================
+# # 17. CHARACTER DEGREE
+# # ============================================
 
-print("\n" + "-" * 60)
-print("5. GRAPH ANALYSIS - DEGREE")
-print("-" * 60)
+# print("\n" + "-" * 60)
+# print("GRAPH ANALYSIS - DEGREE")
+# print("-" * 60)
 
-degrees = dict(graph.degree())
+# degrees = dict(graph.degree())
 
-for name, degree in sorted(
-  degrees.items(),
-  key=lambda x: x[1],
-  reverse=True
-):
-  print(name, "->", degree)
+# for name, degree in sorted(
+#   degrees.items(),
+#   key=lambda x: x[1],
+#   reverse=True
+# ):
 
-
-# ============================================
-# 17. WEIGHTED CHARACTER DEGREE
-# ============================================
-
-print("\n" + "-" * 60)
-print("6. GRAPH ANALYSIS - WEIGHTED DEGREE")
-print("-" * 60)
-
-weighted_degrees = dict(
-  graph.degree(weight="weight")
-)
-
-for name, degree in sorted(
-  weighted_degrees.items(),
-  key=lambda x: x[1],
-  reverse=True
-):
-  print(name, "->", degree)
+#   print(
+#     name,
+#     "->",
+#     degree
+#   )
 
 
-# ============================================
-# 18. DEGREE CENTRALITY
-# ============================================
+# # ============================================
+# # 18. WEIGHTED CHARACTER DEGREE
+# # ============================================
 
-print("\n" + "-" * 60)
-print("7. GRAPH ANALYSIS - DEGREE CENTRALITY")
-print("-" * 60)
+# print("\n" + "-" * 60)
+# print("GRAPH ANALYSIS - WEIGHTED DEGREE")
+# print("-" * 60)
 
-degree_centrality = nx.degree_centrality(graph)
+# weighted_degrees = dict(
+#   graph.degree(weight="weight")
+# )
 
-for name, score in sorted(
-  degree_centrality.items(),
-  key=lambda x: x[1],
-  reverse=True
-):
-  print(
-    name,
-    "->",
-    round(score, 3)
-  )
+# for name, degree in sorted(
+#   weighted_degrees.items(),
+#   key=lambda x: x[1],
+#   reverse=True
+# ):
 
-
-# ============================================
-# 19. BETWEENNESS CENTRALITY
-# ============================================
-
-print("\n" + "-" * 60)
-print("8. GRAPH ANALYSIS - BETWEENNESS CENTRALITY")
-print("-" * 60)
-
-betweenness_centrality = (
-  nx.betweenness_centrality(graph)
-)
-
-for name, score in sorted(
-  betweenness_centrality.items(),
-  key=lambda x: x[1],
-  reverse=True
-):
-  print(
-    name,
-    "->",
-    round(score, 3)
-  )
+#   print(
+#     name,
+#     "->",
+#     degree
+#   )
 
 
-# ============================================
-# END
-# ============================================
+# # ============================================
+# # 19. DEGREE CENTRALITY
+# # ============================================
 
-print("\n" + "=" * 60)
-print("LITMIND PROTOTYPE RUN COMPLETE")
-print("=" * 60)
+# print("\n" + "-" * 60)
+# print("GRAPH ANALYSIS - DEGREE CENTRALITY")
+# print("-" * 60)
+
+# degree_centrality = nx.degree_centrality(
+#   graph
+# )
+
+# for name, score in sorted(
+#   degree_centrality.items(),
+#   key=lambda x: x[1],
+#   reverse=True
+# ):
+
+#   print(
+#     name,
+#     "->",
+#     round(score, 3)
+#   )
+
+
+# # ============================================
+# # 20. BETWEENNESS CENTRALITY
+# # ============================================
+
+# print("\n" + "-" * 60)
+# print("GRAPH ANALYSIS - BETWEENNESS CENTRALITY")
+# print("-" * 60)
+
+# betweenness_centrality = (
+#   nx.betweenness_centrality(graph)
+# )
+
+# for name, score in sorted(
+#   betweenness_centrality.items(),
+#   key=lambda x: x[1],
+#   reverse=True
+# ):
+
+#   print(
+#     name,
+#     "->",
+#     round(score, 3)
+#   )
