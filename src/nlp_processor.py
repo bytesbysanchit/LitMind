@@ -415,6 +415,127 @@ for sentence, persons in sentence_characters:
 
 
 # ============================================
+# FAMILY RELATIONSHIP DETECTION
+# ============================================
+
+def check_married_relationship(
+  parsed_context,
+  pair
+):
+  person1, person2 = pair
+
+  for token in parsed_context:
+
+    if token.lemma_.lower() != "marry":
+      continue
+
+    subjects = [
+      child.text
+      for child in token.children
+      if child.dep_ in {"nsubj", "nsubjpass"}
+    ]
+
+    objects = [
+      child.text
+      for child in token.children
+      if child.dep_ in {"dobj", "obj"}
+    ]
+
+    explicit_characters = []
+
+    for word in parsed_context:
+      if word.text in pair:
+        explicit_characters.append(
+          word.text
+        )
+
+    print("\nMarriage Verb:", token.text)
+    print("Subjects:", subjects)
+    print("Objects:", objects)
+    print(
+      "Explicit characters:",
+      explicit_characters
+    )
+
+family_keywords = {
+  "married",
+  "marry",
+  "wife",
+  "husband",
+  "mother",
+  "father",
+  "brother",
+  "sister",
+  "son",
+  "daughter",
+  "parent",
+  "parents",
+  "family",
+}
+
+family_evidence = {}
+
+for pair, contexts in pair_contexts.items():
+
+  relation_evidence = []
+
+  for context in contexts:
+
+    parsed_context = nlp(context)
+
+    check_married_relationship(
+      parsed_context,
+      pair
+    )
+
+    found_keywords = []
+
+    for token in parsed_context:
+
+      if token.lemma_.lower() in family_keywords:
+        found_keywords.append(
+          token.lemma_.lower()
+        )
+
+    if found_keywords:
+
+      relation_evidence.append({
+        "context": context,
+        "keywords": found_keywords
+      })
+
+  if relation_evidence:
+
+    family_evidence[pair] = relation_evidence
+
+
+# ============================================
+# DISPLAY FAMILY RELATIONSHIP EVIDENCE
+# ============================================
+
+print("\n" + "=" * 60)
+print("FAMILY RELATIONSHIP EVIDENCE")
+print("=" * 60)
+
+for pair, evidences in family_evidence.items():
+
+  print(
+    f"\n{pair[0]} ↔ {pair[1]}"
+  )
+
+  for evidence in evidences:
+
+    print(
+      "Keywords:",
+      ", ".join(evidence["keywords"])
+    )
+
+    print(
+      "Context:",
+      evidence["context"]
+    )
+
+# ============================================
 # DISPLAY RELATIONSHIP CONTEXTS
 # ============================================
 
@@ -433,6 +554,35 @@ for pair, contexts in pair_contexts.items():
 
 
 # ============================================
+# TEST DEPENDENCY PARSING
+# ============================================
+
+def show_dependency_info(sentence):
+
+  parsed_sentence = nlp(sentence)
+
+  print("\nSentence:")
+  print(sentence)
+
+  print("\nDependency Information:")
+  print("-" * 60)
+
+  for token in parsed_sentence:
+
+    print(
+      token.text,
+      "| POS:", token.pos_,
+      "| DEP:", token.dep_,
+      "| HEAD:", token.head.text
+    )
+
+test_context = pair_contexts[
+  ("Sherlock Holmes", "Watson")
+][0]
+
+show_dependency_info(test_context)
+
+# ============================================
 # 15. CREATE CHARACTER GRAPH
 # ============================================
 
@@ -447,32 +597,32 @@ for (person1, person2), count in strong_pairs.items():
   )
 
 
-# ============================================
-# DISPLAY GRAPH INFORMATION
-# ============================================
+# # ============================================
+# # DISPLAY GRAPH INFORMATION
+# # ============================================
 
-print("\n" + "-" * 60)
-print("CHARACTER CO-OCCURRENCE GRAPH")
-print("-" * 60)
+# print("\n" + "-" * 60)
+# print("CHARACTER CO-OCCURRENCE GRAPH")
+# print("-" * 60)
 
-print(
-  "Graph Nodes:",
-  graph.number_of_nodes()
-)
+# print(
+#   "Graph Nodes:",
+#   graph.number_of_nodes()
+# )
 
-print(
-  "Graph Edges:",
-  graph.number_of_edges()
-)
+# print(
+#   "Graph Edges:",
+#   graph.number_of_edges()
+# )
 
-print("\nStrong Character Connections:")
+# print("\nStrong Character Connections:")
 
-for (person1, person2), count in strong_pairs.most_common(10):
+# for (person1, person2), count in strong_pairs.most_common(10):
 
-  print(
-    f"{person1} <-> {person2}"
-    f" | Strength: {count}"
-  )
+#   print(
+#     f"{person1} <-> {person2}"
+#     f" | Strength: {count}"
+#   )
 
 
 # ============================================
