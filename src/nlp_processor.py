@@ -457,6 +457,69 @@ def check_married_relationship(
       explicit_characters
     )
 
+def show_family_dependency(
+  sentence
+):
+  parsed_sentence = nlp(sentence)
+
+  print("\nSentence:")
+  print(sentence)
+
+  print("\nFamily Dependency:")
+  print("-" * 60)
+
+  for token in parsed_sentence:
+
+    if token.lemma_.lower() in family_keywords:
+      print(
+        token.text,
+        "| POS:", token.pos_,
+        "| DEP:", token.dep_,
+        "| HEAD:", token.head.text
+      )
+
+      print("Children:")
+
+      for child in token.children:
+        print(
+          "  ",
+          child.text,
+          "| DEP:", child.dep_,
+          "| HEAD:", child.head.text
+        )
+
+def find_family_characters(
+  parsed_context,
+  pair
+):
+  person1, person2 = pair
+
+  involved_characters = []
+
+  for token in parsed_context:
+
+    if token.text not in pair:
+      continue
+
+    for child in token.children:
+
+      if (
+        child.dep_ in {
+          "nsubj",
+          "nsubjpass",
+          "dobj",
+          "obj",
+          "poss",
+          "appos",
+          "compound"
+        }
+      ):
+        involved_characters.append(
+          child.text
+        )
+
+  return involved_characters
+
 family_keywords = {
   "married",
   "marry",
@@ -471,6 +534,22 @@ family_keywords = {
   "parent",
   "parents",
   "family",
+}
+
+family_relation_map = {
+  "father": "FAMILY",
+  "mother": "FAMILY",
+  "brother": "FAMILY",
+  "sister": "FAMILY",
+  "son": "FAMILY",
+  "daughter": "FAMILY",
+  "husband": "FAMILY",
+  "wife": "FAMILY",
+  "parent": "FAMILY",
+  "parents": "FAMILY",
+  "family": "FAMILY",
+  "married": "FAMILY",
+  "marry": "FAMILY",
 }
 
 family_evidence = {}
@@ -488,25 +567,47 @@ for pair, contexts in pair_contexts.items():
       pair
     )
 
-    found_keywords = []
+  found_keywords = []
 
-    for token in parsed_context:
+  for token in parsed_context:
 
-      if token.lemma_.lower() in family_keywords:
-        found_keywords.append(
-          token.lemma_.lower()
-        )
+    if token.lemma_.lower() in family_keywords:
+      found_keywords.append(
+        token.lemma_.lower()
+      )
+
+  if found_keywords:
+    print(
+      "Found Keywords:",
+      found_keywords
+    )
+
+  if "father" in found_keywords:
+    show_family_dependency(
+      context
+    )
 
     if found_keywords:
+      involved = find_family_characters(
+        parsed_context,
+        pair
+      )
 
       relation_evidence.append({
         "context": context,
-        "keywords": found_keywords
+        "keywords": found_keywords,
+        "involved": involved
       })
+    
+      print(
+        "Involved:",
+        ", ".join(involved)
+      )
 
   if relation_evidence:
 
     family_evidence[pair] = relation_evidence
+
 
 
 # ============================================
