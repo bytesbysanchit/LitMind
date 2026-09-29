@@ -8,7 +8,7 @@ LitMind is an AI-powered Novel Analyzer that uses Natural Language Processing (N
 * Detect characters using Named Entity Recognition (NER)
 * Visualize character relationships
 * Perform chapter-wise sentiment analysis
-* Generate AI-powered summaries
+* Generate AI-powered summary
 * Build an interactive Streamlit dashboard
 
 ## 🛠️ Tech Stack
