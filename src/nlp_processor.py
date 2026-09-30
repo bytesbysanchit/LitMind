@@ -415,114 +415,18 @@ for sentence, persons in sentence_characters:
 
 
 # ============================================
-# FAMILY RELATIONSHIP DETECTION
+# 14. RELATIONSHIP ANALYSIS
 # ============================================
 
-def check_married_relationship(
-  parsed_context,
-  pair
-):
-  person1, person2 = pair
 
-  for token in parsed_context:
-
-    if token.lemma_.lower() != "marry":
-      continue
-
-    subjects = [
-      child.text
-      for child in token.children
-      if child.dep_ in {"nsubj", "nsubjpass"}
-    ]
-
-    objects = [
-      child.text
-      for child in token.children
-      if child.dep_ in {"dobj", "obj"}
-    ]
-
-    explicit_characters = []
-
-    for word in parsed_context:
-      if word.text in pair:
-        explicit_characters.append(
-          word.text
-        )
-
-    print("\nMarriage Verb:", token.text)
-    print("Subjects:", subjects)
-    print("Objects:", objects)
-    print(
-      "Explicit characters:",
-      explicit_characters
-    )
-
-def show_family_dependency(
-  sentence
-):
-  parsed_sentence = nlp(sentence)
-
-  print("\nSentence:")
-  print(sentence)
-
-  print("\nFamily Dependency:")
-  print("-" * 60)
-
-  for token in parsed_sentence:
-
-    if token.lemma_.lower() in family_keywords:
-      print(
-        token.text,
-        "| POS:", token.pos_,
-        "| DEP:", token.dep_,
-        "| HEAD:", token.head.text
-      )
-
-      print("Children:")
-
-      for child in token.children:
-        print(
-          "  ",
-          child.text,
-          "| DEP:", child.dep_,
-          "| HEAD:", child.head.text
-        )
-
-def find_family_characters(
-  parsed_context,
-  pair
-):
-  person1, person2 = pair
-
-  involved_characters = []
-
-  for token in parsed_context:
-
-    if token.text not in pair:
-      continue
-
-    for child in token.children:
-
-      if (
-        child.dep_ in {
-          "nsubj",
-          "nsubjpass",
-          "dobj",
-          "obj",
-          "poss",
-          "appos",
-          "compound"
-        }
-      ):
-        involved_characters.append(
-          child.text
-        )
-
-  return involved_characters
+# --------------------------------------------
+# FAMILY RELATIONSHIP KEYWORDS
+# --------------------------------------------
 
 family_keywords = {
   "married",
   "marry",
+  "marriage",
   "wife",
   "husband",
   "mother",
@@ -533,157 +437,1013 @@ family_keywords = {
   "daughter",
   "parent",
   "parents",
-  "family",
 }
 
-family_relation_map = {
-  "father": "FAMILY",
-  "mother": "FAMILY",
-  "brother": "FAMILY",
-  "sister": "FAMILY",
-  "son": "FAMILY",
-  "daughter": "FAMILY",
-  "husband": "FAMILY",
-  "wife": "FAMILY",
-  "parent": "FAMILY",
-  "parents": "FAMILY",
-  "family": "FAMILY",
-  "married": "FAMILY",
-  "marry": "FAMILY",
+
+# --------------------------------------------
+# OTHER RELATIONSHIP KEYWORDS
+# --------------------------------------------
+
+professional_keywords = {
+  "colleague",
+  "employee",
+  "employer",
+  "assistant",
+  "partner",
+  "client",
+  "detective",
+  "inspector",
+  "officer",
+  "doctor",
+  "lawyer",
 }
 
-family_evidence = {}
 
-for pair, contexts in pair_contexts.items():
+friend_keywords = {
+  "companion",
+  "companions",
+  "trusted",
+  "trust",
+  "faithful",
+  "loyal",
+  "dear",
+}
 
-  relation_evidence = []
 
-  for context in contexts:
+conflict_keywords = {
+  "enemy",
+  "enemies",
+  "rival",
+  "rivals",
+  "opponent",
+  "opponents",
+  "fight",
+  "fought",
+  "fighting",
+  "attack",
+  "attacked",
+  "threat",
+  "threatened",
+  "arrest",
+  "arrested",
+  "revenge",
+  "villain",
+}
 
-    parsed_context = nlp(context)
 
-    check_married_relationship(
-      parsed_context,
-      pair
+relation_keyword_map = {
+  "PROFESSIONAL": professional_keywords,
+  "FRIEND / COMPANION": friend_keywords,
+  "CONFLICT / ENEMY": conflict_keywords,
+}
+
+
+# --------------------------------------------
+# INTERACTION VERBS
+# --------------------------------------------
+
+interaction_verbs = {
+  "ask",
+  "answer",
+  "reply",
+  "tell",
+  "help",
+  "meet",
+  "visit",
+  "follow",
+  "accompany",
+  "join",
+  "assist",
+}
+
+
+reporting_verbs = {
+  "say",
+  "remark",
+  "ask",
+  "reply",
+  "answer",
+  "tell",
+  "cry",
+  "exclaim",
+}
+
+
+# --------------------------------------------
+# HELPER: CHARACTER NAME PARTS
+# --------------------------------------------
+
+def get_name_parts(name):
+
+  parts = []
+
+  for word in name.split():
+
+    word = (
+      word
+      .replace(".", "")
+      .replace(",", "")
+      .strip()
+      .lower()
     )
 
-  found_keywords = []
+    if word not in {
+      "mr",
+      "mrs",
+      "miss",
+      "ms",
+      "dr",
+      "lady",
+      "sir"
+    }:
+      parts.append(word)
+
+  return parts
+
+
+# --------------------------------------------
+# HELPER: CHECK CHARACTER WORDS
+# --------------------------------------------
+
+def character_words_present(
+  parsed_context,
+  name
+):
+
+  name_parts = get_name_parts(name)
+
+  context_words = {
+    token.text.lower()
+    for token in parsed_context
+  }
+
+  return any(
+    part in context_words
+    for part in name_parts
+  )
+
+
+# --------------------------------------------
+# FAMILY RELATIONSHIP DETECTION
+# --------------------------------------------
+
+def detect_family_relation(
+  context,
+  pair
+):
+
+  person1, person2 = pair
+
+  parsed_context = nlp(context)
+
+  person1_parts = set(
+    get_name_parts(person1)
+  )
+
+  person2_parts = set(
+    get_name_parts(person2)
+  )
+
+  # ==========================================
+  # 1. MARRIAGE VERB
+  # ==========================================
 
   for token in parsed_context:
 
-    if token.lemma_.lower() in family_keywords:
-      found_keywords.append(
-        token.lemma_.lower()
+    if token.lemma_.lower() != "marry":
+      continue
+
+    subject_words = set()
+    object_words = set()
+
+    # ------------------------------------------
+    # Find actual subject and object
+    # ------------------------------------------
+
+    for child in token.children:
+
+      if child.dep_ in {
+        "nsubj",
+        "nsubjpass"
+      }:
+
+        for subtoken in child.subtree:
+          subject_words.add(
+            subtoken.text.lower()
+          )
+
+      elif child.dep_ in {
+        "obj",
+        "dobj"
+      }:
+
+        for subtoken in child.subtree:
+          object_words.add(
+            subtoken.text.lower()
+          )
+
+    # ------------------------------------------
+    # CASE A:
+    # Explicit character + explicit character
+    #
+    # Example:
+    # "Holmes married Irene."
+    # ------------------------------------------
+
+    person1_subject = any(
+      part in subject_words
+      for part in person1_parts
+    )
+
+    person2_subject = any(
+      part in subject_words
+      for part in person2_parts
+    )
+
+    person1_object = any(
+      part in object_words
+      for part in person1_parts
+    )
+
+    person2_object = any(
+      part in object_words
+      for part in person2_parts
+    )
+
+    if (
+      (person1_subject and person2_object)
+      or
+      (person2_subject and person1_object)
+    ):
+      return True
+
+    # ------------------------------------------
+    # CASE B:
+    # Pronoun subject + explicit person object
+    #
+    # Example:
+    # "He married Mrs. Stoner."
+    # ------------------------------------------
+
+    subject_is_pronoun = False
+
+    for child in token.children:
+
+      if child.dep_ in {
+        "nsubj",
+        "nsubjpass"
+      } and child.pos_ == "PRON":
+
+        subject_is_pronoun = True
+
+    if not subject_is_pronoun:
+      continue
+
+    # ------------------------------------------
+    # Find nearest PERSON before marriage verb
+    # ------------------------------------------
+
+    previous_person = None
+
+    for ent in parsed_context.ents:
+
+      if (
+        ent.label_ == "PERSON"
+        and ent.end <= token.i
+      ):
+        previous_person = ent
+
+    if previous_person is None:
+      continue
+
+    previous_words = {
+      word
+      .replace(".", "")
+      .replace(",", "")
+      .lower()
+      for word in previous_person.text.split()
+    }
+
+    previous_is_person1 = any(
+      part in previous_words
+      for part in person1_parts
+    )
+
+    previous_is_person2 = any(
+      part in previous_words
+      for part in person2_parts
+    )
+
+    # ------------------------------------------
+    # Explicit object character
+    # ------------------------------------------
+
+    object_is_person1 = any(
+      part in object_words
+      for part in person1_parts
+    )
+
+    object_is_person2 = any(
+      part in object_words
+      for part in person2_parts
+    )
+
+    if (
+      previous_is_person1
+      and object_is_person2
+    ):
+      return True
+
+    if (
+      previous_is_person2
+      and object_is_person1
+    ):
+      return True
+
+
+  # ==========================================
+  # 2. DIRECT FAMILY NOUN
+  # ==========================================
+
+  family_nouns = {
+    "wife",
+    "husband",
+    "mother",
+    "father",
+    "brother",
+    "sister",
+    "son",
+    "daughter",
+    "parent"
+  }
+
+  for token in parsed_context:
+
+    if token.lemma_.lower() not in family_nouns:
+      continue
+
+    connected_words = {
+      subtoken.text.lower()
+      for subtoken in token.subtree
+    }
+
+    person1_present = any(
+      part in connected_words
+      for part in person1_parts
+    )
+
+    person2_present = any(
+      part in connected_words
+      for part in person2_parts
+    )
+
+    if (
+      person1_present
+      and person2_present
+    ):
+      return True
+
+  return False
+
+
+# --------------------------------------------
+# DIRECT INTERACTION DETECTION
+# --------------------------------------------
+
+def detect_direct_interaction(
+  context,
+  pair
+):
+
+  person1, person2 = pair
+
+  parsed_context = nlp(context)
+
+  person1_parts = get_name_parts(person1)
+  person2_parts = get_name_parts(person2)
+
+
+  # ------------------------------------------
+  # 1. DIRECT SPEECH / ADDRESS
+  # ------------------------------------------
+
+  for token in parsed_context:
+
+    if (
+      token.lemma_.lower()
+      not in reporting_verbs
+    ):
+      continue
+
+    speaker = None
+
+    # Find speaker of reporting verb.
+
+    for child in token.children:
+
+      if child.dep_ in {
+        "nsubj",
+        "nsubjpass"
+      }:
+
+        speaker_words = {
+          subtoken.text.lower()
+          for subtoken in child.subtree
+        }
+
+        if any(
+          part in speaker_words
+          for part in person1_parts
+        ):
+          speaker = person1
+
+        elif any(
+          part in speaker_words
+          for part in person2_parts
+        ):
+          speaker = person2
+
+
+    if speaker is None:
+      continue
+
+
+    # --------------------------------------
+    # Find addressee near the end of speech
+    # --------------------------------------
+
+    other_person = (
+      person2
+      if speaker == person1
+      else person1
+    )
+
+    other_parts = get_name_parts(
+      other_person
+    )
+
+    for ent in parsed_context.ents:
+
+      if ent.label_ != "PERSON":
+        continue
+
+      ent_words = {
+        word.lower()
+        for word in ent.text.split()
+      }
+
+      matches_other = any(
+        part in ent_words
+        for part in other_parts
       )
 
-  if found_keywords:
-    print(
-      "Found Keywords:",
-      found_keywords
+      if not matches_other:
+        continue
+
+      # Character should occur shortly before
+      # the reporting verb.
+
+      distance = token.i - ent.end
+
+      if distance < 0 or distance > 6:
+        continue
+
+      # Avoid cases where the character is
+      # merely an object/subject in the sentence.
+
+      ent_tokens = list(ent)
+
+      valid_address = False
+
+      for ent_token in ent_tokens:
+
+        if ent_token.dep_ in {
+          "vocative",
+          "npadvmod"
+        }:
+          valid_address = True
+
+      if valid_address:
+
+        return True
+
+
+  # ------------------------------------------
+  # 2. DIRECT ACTION BETWEEN CHARACTERS
+  # ------------------------------------------
+
+  for token in parsed_context:
+
+    if (
+      token.lemma_.lower()
+      not in interaction_verbs
+    ):
+      continue
+
+    subject_words = set()
+    object_words = set()
+
+    # ----------------------------------------
+    # Find actual subject
+    # ----------------------------------------
+
+    for child in token.children:
+
+      if child.dep_ in {
+        "nsubj",
+        "nsubjpass"
+      }:
+
+        for subtoken in child.subtree:
+
+          subject_words.add(
+            subtoken.text.lower()
+          )
+
+    # ----------------------------------------
+    # Find actual object / recipient
+    # ----------------------------------------
+
+      elif child.dep_ in {
+        "obj",
+        "dobj",
+        "iobj",
+        "pobj"
+      }:
+
+        for subtoken in child.subtree:
+
+          object_words.add(
+            subtoken.text.lower()
+          )
+
+    # ----------------------------------------
+    # Check whether person1/person2 are
+    # actually on opposite sides of action
+    # ----------------------------------------
+
+    person1_subject = any(
+      part in subject_words
+      for part in person1_parts
     )
 
-  if "father" in found_keywords:
-    show_family_dependency(
-      context
+    person2_subject = any(
+      part in subject_words
+      for part in person2_parts
     )
 
-    if found_keywords:
-      involved = find_family_characters(
-        parsed_context,
-        pair
-      )
-
-      relation_evidence.append({
-        "context": context,
-        "keywords": found_keywords,
-        "involved": involved
-      })
-    
-      print(
-        "Involved:",
-        ", ".join(involved)
-      )
-
-  if relation_evidence:
-
-    family_evidence[pair] = relation_evidence
-
-
-
-# ============================================
-# DISPLAY FAMILY RELATIONSHIP EVIDENCE
-# ============================================
-
-print("\n" + "=" * 60)
-print("FAMILY RELATIONSHIP EVIDENCE")
-print("=" * 60)
-
-for pair, evidences in family_evidence.items():
-
-  print(
-    f"\n{pair[0]} ↔ {pair[1]}"
-  )
-
-  for evidence in evidences:
-
-    print(
-      "Keywords:",
-      ", ".join(evidence["keywords"])
+    person1_object = any(
+      part in object_words
+      for part in person1_parts
     )
 
-    print(
-      "Context:",
-      evidence["context"]
+    person2_object = any(
+      part in object_words
+      for part in person2_parts
     )
 
-# ============================================
-# DISPLAY RELATIONSHIP CONTEXTS
-# ============================================
+    # ----------------------------------------
+    # Genuine interaction:
+    #
+    # person1 -> action -> person2
+    # OR
+    # person2 -> action -> person1
+    # ----------------------------------------
 
-print("\n" + "=" * 60)
-print("RELATIONSHIP CONTEXTS")
-print("=" * 60)
+    if (
+      person1_subject
+      and person2_object
+    ):
+      return True
 
-for pair, contexts in pair_contexts.items():
+    if (
+      person2_subject
+      and person1_object
+    ):
+      return True
 
-  print(
-    f"\n{pair[0]} ↔ {pair[1]}"
-  )
+
+  return False
+
+
+# --------------------------------------------
+# RELATION KEYWORD DETECTION
+# --------------------------------------------
+
+def detect_keyword_relation(
+  context,
+  pair
+):
+
+  person1, person2 = pair
+
+  parsed_context = nlp(context)
+
+  person1_parts = get_name_parts(person1)
+  person2_parts = get_name_parts(person2)
+
+  found_relations = {
+    "PROFESSIONAL": [],
+    "FRIEND / COMPANION": [],
+    "CONFLICT / ENEMY": [],
+  }
+
+
+  for token in parsed_context:
+
+    word = token.lemma_.lower()
+
+    matched_relation = None
+
+    for relation, keywords in (
+      relation_keyword_map.items()
+    ):
+
+      if word in keywords:
+
+        matched_relation = relation
+        break
+
+    if matched_relation is None:
+      continue
+
+
+    # ----------------------------------------
+    # Check nearby character evidence
+    # ----------------------------------------
+
+    start = max(
+      0,
+      token.i - 5
+    )
+
+    end = min(
+      len(parsed_context),
+      token.i + 6
+    )
+
+    nearby_words = {
+      parsed_context[i].text.lower()
+      for i in range(start, end)
+    }
+
+    person1_nearby = any(
+      part in nearby_words
+      for part in person1_parts
+    )
+
+    person2_nearby = any(
+      part in nearby_words
+      for part in person2_parts
+    )
+
+    if (
+      person1_nearby
+      and person2_nearby
+    ):
+
+      found_relations[
+        matched_relation
+      ].append(word)
+
+  return found_relations
+
+
+# --------------------------------------------
+# BUILD RELATIONSHIP EVIDENCE
+# --------------------------------------------
+
+relationship_results = {}
+
+
+for pair, contexts in (
+  pair_contexts.items()
+):
+
+  family_evidence = []
+  interaction_evidence = []
+  keyword_evidence = []
+
 
   for context in contexts:
-    print(f"- {context}")
+
+    # --------------------------------------
+    # FAMILY
+    # --------------------------------------
+
+    if detect_family_relation(
+      context,
+      pair
+    ):
+
+      family_evidence.append({
+        "context": context,
+        "keywords": [
+          token.lemma_.lower()
+          for token in nlp(context)
+          if (
+            token.lemma_.lower()
+            in family_keywords
+          )
+        ]
+      })
+
+      continue
 
 
-# ============================================
-# TEST DEPENDENCY PARSING
-# ============================================
+    # --------------------------------------
+    # DIRECT INTERACTION
+    # --------------------------------------
 
-def show_dependency_info(sentence):
+    if detect_direct_interaction(
+      context,
+      pair
+    ):
 
-  parsed_sentence = nlp(sentence)
+      interaction_evidence.append({
+        "context": context,
+        "keywords": []
+      })
 
-  print("\nSentence:")
-  print(sentence)
 
-  print("\nDependency Information:")
-  print("-" * 60)
+    # --------------------------------------
+    # OTHER RELATIONSHIP KEYWORDS
+    # --------------------------------------
 
-  for token in parsed_sentence:
-
-    print(
-      token.text,
-      "| POS:", token.pos_,
-      "| DEP:", token.dep_,
-      "| HEAD:", token.head.text
+    found_relations = (
+      detect_keyword_relation(
+        context,
+        pair
+      )
     )
 
-test_context = pair_contexts[
-  ("Sherlock Holmes", "Watson")
-][0]
+    for relation, keywords in (
+      found_relations.items()
+    ):
 
-show_dependency_info(test_context)
+      if keywords:
+
+        keyword_evidence.append({
+          "context": context,
+          "keywords": keywords,
+          "relation": relation
+        })
+
+
+  # ========================================
+  # FINAL CLASSIFICATION
+  # ========================================
+
+  if family_evidence:
+
+    relationship_results[pair] = {
+      "relationship": "FAMILY",
+      "keywords": [
+        keyword
+        for item in family_evidence
+        for keyword in item["keywords"]
+      ],
+      "evidence": family_evidence,
+      "score": len(family_evidence)
+    }
+
+    continue
+
+
+  # ----------------------------------------
+  # CONFLICT / PROFESSIONAL / FRIEND
+  # ----------------------------------------
+
+  relation_scores = {
+    "PROFESSIONAL": 0,
+    "FRIEND / COMPANION": 0,
+    "CONFLICT / ENEMY": 0,
+  }
+
+  best_keyword_evidence = []
+
+
+  for item in keyword_evidence:
+
+    relation = item["relation"]
+
+    relation_scores[relation] += (
+      len(item["keywords"])
+    )
+
+    best_keyword_evidence.append(item)
+
+
+  best_relation = max(
+    relation_scores,
+    key=relation_scores.get
+  )
+
+  best_score = relation_scores[
+    best_relation
+  ]
+
+
+  # ----------------------------------------
+  # Repeated direct interaction
+  # ----------------------------------------
+
+  if (
+    len(interaction_evidence) >= 3
+    and best_score == 0
+  ):
+
+    relationship_results[pair] = {
+      "relationship": "FRIEND / COMPANION",
+      "keywords": [],
+      "evidence": interaction_evidence,
+      "score": len(interaction_evidence)
+    }
+
+  elif best_score > 0:
+
+    selected_evidence = [
+      item
+      for item in best_keyword_evidence
+      if item["relation"] == best_relation
+    ]
+
+    relationship_results[pair] = {
+      "relationship": best_relation,
+      "keywords": [
+        keyword
+        for item in selected_evidence
+        for keyword in item["keywords"]
+      ],
+      "evidence": selected_evidence,
+      "score": best_score
+    }
+
+  elif interaction_evidence:
+
+    relationship_results[pair] = {
+      "relationship": "INTERACTION",
+      "keywords": [],
+      "evidence": interaction_evidence,
+      "score": len(interaction_evidence)
+    }
+
+  else:
+
+    relationship_results[pair] = {
+      "relationship": "OTHER / UNKNOWN",
+      "keywords": [],
+      "evidence": [],
+      "score": 0
+    }
 
 # ============================================
+# RELATIONSHIP STRENGTH
+# ============================================
+# This is CO-OCCURRENCE strength, not semantic
+# relationship strength.
+
+for pair, result in relationship_results.items():
+
+  co_occurrence = strong_pairs[pair]
+
+  if co_occurrence >= 4:
+    strength = "STRONG"
+
+  elif co_occurrence >= 2:
+    strength = "MODERATE"
+
+  else:
+    strength = "WEAK"
+
+  result["co_occurrence"] = co_occurrence
+  result["strength"] = strength
+
+  # Relationship confidence
+  if result["relationship"] == "FAMILY":
+    result["confidence"] = "HIGH"
+
+  elif result["score"] >= 3:
+    result["confidence"] = "MEDIUM"
+
+  elif result["score"] >= 1:
+    result["confidence"] = "LOW"
+
+  else:
+    result["confidence"] = "LOW"
+
+
+# ============================================
+# FINAL RELATIONSHIP OUTPUT
+# ============================================
+
+print(
+  "\n" + "=" * 60
+)
+
+print(
+  "FINAL CHARACTER RELATIONSHIP ANALYSIS"
+)
+
+print(
+  "=" * 60
+)
+
+for pair, result in relationship_results.items():
+
+  person1, person2 = pair
+
+  print(
+    f"\n{person1} ↔ {person2}"
+  )
+
+  print(
+    "Relationship:",
+    result["relationship"]
+  )
+
+  print(
+    "Confidence:",
+    result["confidence"]
+  )
+
+  print(
+    "Co-occurrence:",
+    result["co_occurrence"]
+  )
+
+  print(
+    "Co-occurrence Strength:",
+    result["strength"]
+  )
+
+  if result["keywords"]:
+    print(
+      "Keywords:",
+      ", ".join(
+        sorted(
+          set(result["keywords"])
+        )
+      )
+    )
+  else:
+    print(
+      "Keywords: None"
+    )
+
+  if result["evidence"]:
+
+    print("Evidence:")
+
+    shown_contexts = set()
+
+    for evidence in result["evidence"]:
+
+      context = evidence["context"]
+
+      if context in shown_contexts:
+        continue
+
+      shown_contexts.add(context)
+
+      print(
+        " -",
+        context
+      )
+  else:
+    print(
+      "Evidence: No reliable relationship evidence found."
+    )
+
+
+# ============================================
+# RELATIONSHIP SUMMARY
+# ============================================
+
+print(
+  "\n" + "=" * 60
+)
+
+print(
+  "RELATIONSHIP SUMMARY"
+)
+
+print(
+  "=" * 60
+)
+
+relationship_summary = Counter()
+
+for result in relationship_results.values():
+  relationship_summary[
+    result["relationship"]
+  ] += 1
+
+for relation, count in relationship_summary.items():
+  print(
+    f"{relation}: {count}"
+  )
+
 # 15. CREATE CHARACTER GRAPH
 # ============================================
 
