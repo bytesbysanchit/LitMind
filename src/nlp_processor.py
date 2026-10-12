@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 # python src/nlp_processor.py path/to/novel.txt
 
 DEFAULT_TEXT_PATH = Path(
-  "data/processed/Sherlock_Holmes.txt"
+  "data/processed/Dance_Like_a_Man_clean_input.txt"
 )
 
 text_path = (
