@@ -339,43 +339,11 @@ def build_semantic_relation_edges(corpus_path, output_path):
     rows_out.append([play, a, b, relation, "CORPUS_DOCUMENTED_NOTE", 1, "",
                      note, "Documented in CHARACTER_MASTER.Notes; not independently gold-validated."])
 
-  if "TARA_FULL_ANNOTATION_V4" in source_wb.sheetnames:
-    data = list(source_wb["TARA_FULL_ANNOTATION_V4"].iter_rows(values_only=True))
-    headers = [clean(x) for x in data[0]]
-    ix = {name: headers.index(name) for name in headers}
-    grouped = defaultdict(lambda: {"ids": [], "contexts": []})
-    for row in data[1:]:
-      play = play_key(row[ix["Play_ID"]], row[ix["Play"]]) if "Play_ID" in ix else "Tara"
-      if play != "Tara":
-        continue
-      speaker = references[play].get(norm(row[ix["Speaker"]])) if "Speaker" in ix else None
-      if not speaker:
-        continue
-      for target_col, rel_col in [
-        ("Masculinity_Target", "Target_Relation"),
-        ("Secondary_Target", "Secondary_Target_Relation")
-      ]:
-        target_raw = clean(row[ix[target_col]]) if target_col in ix else ""
-        relation = clean(row[ix[rel_col]]).upper() if rel_col in ix else ""
-        # Multiple targets are only accepted when each exact token maps to a
-        # reference character; generic categories remain annotations, not nodes.
-        if not target_raw or relation in {"", "ND", "SELF"}:
-          continue
-        target_parts = [x.strip() for x in target_raw.split(";") if x.strip()]
-        targets = [references[play].get(norm(x)) for x in target_parts]
-        if not targets or any(x is None for x in targets):
-          continue
-        for target in targets:
-          if target == speaker:
-            continue
-          key = (play, speaker, target, relation, "TARA_UTTERANCE_ANNOTATION")
-          grouped[key]["ids"].append(clean(row[ix["Speech_ID"]]) if "Speech_ID" in ix else "")
-          grouped[key]["contexts"].append(clean(row[ix["Primary_Text"]])[:220] if "Primary_Text" in ix else "")
-    for (play, source, target, relation, evidence_type), info in sorted(grouped.items()):
-      ids = list(dict.fromkeys(x for x in info["ids"] if x))
-      rows_out.append([play, source, target, relation, evidence_type, len(ids),
-                       "; ".join(ids[:10]), " || ".join(info["contexts"][:2]),
-                       "Existing utterance-level annotation mapped to known character endpoints; review source QA and context."])
+  # IMPORTANT: Tara's Target_Relation fields are utterance-level research annotations.
+  # They are preserved in Tara_Annotation_Evidence, but are NOT converted into
+  # speaker-target social-relation edges because the field semantics do not establish
+  # that the speaker and target are the two endpoints of a real-world relationship.
+  # This avoids unsupported/conflicting edges such as Bharati--SIBLINGS-->Chandan.
 
   source_wb.close()
   wb = openpyxl.load_workbook(output_path)
@@ -465,7 +433,7 @@ def export_play_graphs(output_path, graph_dir, semantic_rows):
     rel_path = graph_dir / (("tara" if play == "Tara" else "dance_like_a_man") + "_relationship_evidence_graph.png")
     subtitle = ("Existing utterance annotations; not independently verified" if play == "Tara"
                 else "Explicit CHARACTER_MASTER notes; not a complete graph")
-    _draw_network(sg, rel_path, f"{play} — semantic relationship evidence\n({subtitle})",
+    _draw_network(sg, rel_path, f"{play} — relationship evidence\n({subtitle})",
                   edge_labels=relation_labels, directed=(play != "Tara"))
     index_rows.append([play, "Relationship evidence graph", str(rel_path.relative_to(output_path.parent)),
                        sg.number_of_nodes(), sg.number_of_edges(), subtitle])
@@ -604,6 +572,7 @@ def main():
   notes_ws.append(["Scope", "The adapter is currently tested against Tara and Dance Like a Man. Support for arbitrary plays is not established by these two cases alone."])
   notes_ws.append(["Record-count discrepancy", "The workbook's CORPUS_SUMMARY reports 993 Dance Like a Man turns, while UTTERANCE_CORPUS contains 996 rows for that play. This adapter analyzes the 996 UTTERANCE_CORPUS rows and does not silently reconcile the discrepancy."])
   notes_ws.append(["Accuracy claims", "Do not report overall precision/recall/F1 from these diagnostic outputs alone. Relationship metrics require compatible, independently verified pairwise labels."])
+  notes_ws.append(["Tara relationship graph", "TARA_FULL_ANNOTATION_V4 Target_Relation values are retained in Tara_Annotation_Evidence only. They are not converted to pairwise social-relation edges because their field semantics do not establish a relationship between the utterance speaker and target."])
 
   for play in ["Tara", "Dance Like a Man"]:
     ref_names = [name for (p, name) in characters if p == play]
@@ -792,7 +761,7 @@ def main():
   print("  Excluded_Low_Quality_Evidence: title/byline/copyright or likely stage-direction contexts removed from candidate summaries.")
   print("  Alias_Mention_Candidates: literal alias hits with Speech_ID and context.")
   print("  Corpus_Documented_Relations: pairwise relations explicitly stated in CHARACTER_MASTER notes.")
-  print("  Tara_Annotation_Evidence: existing utterance-level annotations, not a complete social-relation graph.")
+  print("  Tara_Annotation_Evidence: existing utterance-level annotations preserved; not converted into pairwise social-relation edges.")
   print("\nCHARACTERS")
   for play in ["Tara", "Dance Like a Man"]:
     names = [name for (p, name) in characters if p == play]
