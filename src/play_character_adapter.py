@@ -10,9 +10,14 @@ Requires: openpyxl, spacy, en_core_web_sm
 from pathlib import Path
 from collections import Counter, defaultdict
 import argparse
+import os
 import re
 import openpyxl
 import spacy
+import networkx as nx
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 PLAY_NAMES = {"D01": "Tara", "D02": "Dance Like a Man"}
 STAGE_ACTION_WORDS = {
@@ -156,6 +161,45 @@ def cue_categories(text):
   return found
 
 
+def classify_evidence_context(context):
+  """Conservative quality screen; it does not assign a semantic relationship label."""
+  folded = norm(context)
+  if any(term in folded for term in [
+    "copyright", "all rights reserved", "the title of the play",
+    "a drama in two acts", "title of the play", "by chandan patel",
+    "by mahesh dattani"
+  ]):
+    return "EXCLUDE_FROM_RELATION_CANDIDATES: title/byline/copyright metadata"
+  stripped = clean(context)
+  parenthetical_actions = re.findall(r"\(([^)]{1,120})\)", stripped)
+  if (stripped.startswith("(") or parenthetical_actions) and any(
+    re.search(r"\b" + re.escape(word) + r"\b", norm(part))
+    for part in ([stripped] if stripped.startswith("(") else parenthetical_actions)
+    for word in STAGE_ACTION_WORDS
+  ):
+    return "REVIEW_STAGE_DIRECTION: likely action/direction context"
+  if not stripped:
+    return "REVIEW: empty context"
+  return "REVIEWABLE_NAME_MENTION: not a confirmed relationship"
+
+
+def cue_categories_near_alias(context, alias):
+  """Only report cue words close to the matched alias; still candidate evidence only."""
+  folded = norm(context)
+  alias_norm = norm(alias)
+  match = re.search(r"(?<![a-z])" + r"\s+".join(re.escape(x) for x in alias_norm.split()) + r"(?![a-z])", folded)
+  if not match:
+    return []
+  left = max(0, match.start() - 90)
+  right = min(len(folded), match.end() + 90)
+  local_context = folded[left:right]
+  found = []
+  for category, terms in RELATION_CUES.items():
+    if any(re.search(r"(?<![a-z])" + re.escape(term) + r"(?![a-z])", local_context) for term in terms):
+      found.append(category)
+  return found
+
+
 def target_mentions_in_turn(play, row, ref_names, label_to_character):
   """Create speaker-to-mentioned-character candidates from one annotated dialogue turn."""
   speaker = label_to_character.get((play, row["speaker_label"]))
@@ -177,7 +221,8 @@ def target_mentions_in_turn(play, row, ref_names, label_to_character):
           "play": play, "source": speaker, "target": canonical, "alias": alias,
           "speech_id": row["speech_id"], "speaker_label": row["speaker_label"],
           "qa_flag": row.get("qa_flag", ""),
-          "cue_categories": cue_categories(context), "context": context[:350]
+          "cue_categories": cue_categories_near_alias(context, alias), "context": context[:350],
+          "quality": classify_evidence_context(context)
         })
         break
   # One source-target pair per utterance; prefer the longest alias if several matched.
@@ -188,6 +233,256 @@ def target_mentions_in_turn(play, row, ref_names, label_to_character):
     if previous is None or len(item["alias"]) > len(previous["alias"]):
       unique[key] = item
   return list(unique.values())
+
+
+def build_corpus_documented_relations(master_rows, master_headers):
+  """Extract only explicit pairwise relations stated in CHARACTER_MASTER.Notes."""
+  idx = {name: master_headers.index(name) for name in master_headers}
+  out = []
+  for row in master_rows[1:]:
+    if not row:
+      continue
+    play = play_key(row[idx["Play_ID"]])
+    source = clean(row[idx["Character_Name"]])
+    note = clean(row[idx["Notes"]]) if "Notes" in idx else ""
+    folded = norm(note)
+    if play != "Dance Like a Man" or not source or not note:
+      continue
+    if source == "Ratna" and re.search(r"\bjairaj'?s wife\b", folded):
+      out.append([play, "Jairaj", "Ratna", "SPOUSE", note, "CHARACTER_MASTER.Notes",
+                  "Explicit relation stated in corpus character notes; direction normalized for display."])
+    elif source == "Viswas" and re.search(r"\blata'?s fianc[eé]\b", folded):
+      out.append([play, "Lata", "Viswas", "FIANCE", note, "CHARACTER_MASTER.Notes",
+                  "Explicit relation stated in corpus character notes; direction normalized for display."])
+    elif source == "Lata" and re.search(r"\bdaughter of jairaj and ratna\b", folded):
+      out.append([play, "Jairaj", "Lata", "PARENT_CHILD", note, "CHARACTER_MASTER.Notes",
+                  "Explicit relation stated in corpus character notes."])
+      out.append([play, "Ratna", "Lata", "PARENT_CHILD", note, "CHARACTER_MASTER.Notes",
+                  "Explicit relation stated in corpus character notes."])
+    elif source == "Amritlal" and re.search(r"\bjairaj'?s father\b", folded):
+      out.append([play, "Amritlal", "Jairaj", "PARENT_CHILD", note, "CHARACTER_MASTER.Notes",
+                  "Explicit relation stated in corpus character notes."])
+  return out
+
+
+def add_tara_annotation_evidence(corpus_path, output_path):
+  """Keep existing Tara utterance-level target/relation labels visible without miscalling them a graph."""
+  src = openpyxl.load_workbook(corpus_path, read_only=True, data_only=True)
+  out_rows = []
+  if "TARA_FULL_ANNOTATION_V4" in src.sheetnames:
+    data = list(src["TARA_FULL_ANNOTATION_V4"].iter_rows(values_only=True))
+    headers = [clean(x) for x in data[0]]
+    wanted = ["Speech_ID", "Speaker", "Primary_Text", "Masculinity_Target", "Secondary_Target",
+              "Target_Relation", "Secondary_Target_Relation", "Target_Evidence_Type",
+              "Source_QA_Flag", "Research_Memo"]
+    ix = {name: headers.index(name) for name in wanted if name in headers}
+    for row in data[1:]:
+      rel = clean(row[ix["Target_Relation"]]) if "Target_Relation" in ix else ""
+      rel2 = clean(row[ix["Secondary_Target_Relation"]]) if "Secondary_Target_Relation" in ix else ""
+      if (rel and rel != "ND") or (rel2 and rel2 != "ND"):
+        out_rows.append([
+          clean(row[ix["Speech_ID"]]) if "Speech_ID" in ix else "",
+          clean(row[ix["Speaker"]]) if "Speaker" in ix else "",
+          clean(row[ix["Masculinity_Target"]]) if "Masculinity_Target" in ix else "",
+          clean(row[ix["Secondary_Target"]]) if "Secondary_Target" in ix else "",
+          rel, rel2,
+          clean(row[ix["Target_Evidence_Type"]]) if "Target_Evidence_Type" in ix else "",
+          clean(row[ix["Primary_Text"]])[:600] if "Primary_Text" in ix else "",
+          clean(row[ix["Source_QA_Flag"]]) if "Source_QA_Flag" in ix else "",
+          clean(row[ix["Research_Memo"]])[:600] if "Research_Memo" in ix else "",
+          "Existing utterance-level target annotation; NOT a complete pairwise social-relation label."
+        ])
+  src.close()
+  wb = openpyxl.load_workbook(output_path)
+  if "Tara_Annotation_Evidence" in wb.sheetnames:
+    del wb["Tara_Annotation_Evidence"]
+  ws = wb.create_sheet("Tara_Annotation_Evidence")
+  ws.append(["Speech_ID", "Speaker", "Masculinity_Target", "Secondary_Target", "Target_Relation",
+             "Secondary_Target_Relation", "Target_Evidence_Type", "Annotated utterance",
+             "Source QA flag", "Research memo", "Interpretation"])
+  for row in out_rows:
+    ws.append(row)
+  ws.freeze_panes = "A2"
+  ws.auto_filter.ref = ws.dimensions
+  widths = [18, 18, 22, 22, 24, 28, 25, 70, 40, 70, 70]
+  for i, width in enumerate(widths, 1):
+    ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = width
+  wb.save(output_path)
+
+
+
+def build_semantic_relation_edges(corpus_path, output_path):
+  """
+  Add only corpus-documented Dance Like a Man relations and Tara's existing
+  character-target annotations when both endpoints map to known characters.
+  These remain evidence edges, not independently validated ground truth.
+  """
+  source_wb = openpyxl.load_workbook(corpus_path, read_only=True, data_only=True)
+  master_data = list(source_wb["CHARACTER_MASTER"].iter_rows(values_only=True))
+  master_headers = [clean(x) for x in master_data[0]]
+  mi = {name: master_headers.index(name) for name in master_headers}
+  references = defaultdict(dict)
+  for row in master_data[1:]:
+    if not row:
+      continue
+    play = play_key(row[mi["Play_ID"]])
+    name = clean(row[mi["Character_Name"]])
+    label = clean(row[mi["Source_Speaker_Label"]]).upper()
+    if play and name:
+      references[play][norm(name)] = name
+      references[play][norm(label)] = name
+      references[play][norm(name.replace("Dr ", ""))] = name
+
+  rows_out = []
+  for row in build_corpus_documented_relations(master_data, master_headers):
+    play, a, b, relation, note, source_field, interpretation = row
+    rows_out.append([play, a, b, relation, "CORPUS_DOCUMENTED_NOTE", 1, "",
+                     note, "Documented in CHARACTER_MASTER.Notes; not independently gold-validated."])
+
+  if "TARA_FULL_ANNOTATION_V4" in source_wb.sheetnames:
+    data = list(source_wb["TARA_FULL_ANNOTATION_V4"].iter_rows(values_only=True))
+    headers = [clean(x) for x in data[0]]
+    ix = {name: headers.index(name) for name in headers}
+    grouped = defaultdict(lambda: {"ids": [], "contexts": []})
+    for row in data[1:]:
+      play = play_key(row[ix["Play_ID"]], row[ix["Play"]]) if "Play_ID" in ix else "Tara"
+      if play != "Tara":
+        continue
+      speaker = references[play].get(norm(row[ix["Speaker"]])) if "Speaker" in ix else None
+      if not speaker:
+        continue
+      for target_col, rel_col in [
+        ("Masculinity_Target", "Target_Relation"),
+        ("Secondary_Target", "Secondary_Target_Relation")
+      ]:
+        target_raw = clean(row[ix[target_col]]) if target_col in ix else ""
+        relation = clean(row[ix[rel_col]]).upper() if rel_col in ix else ""
+        # Multiple targets are only accepted when each exact token maps to a
+        # reference character; generic categories remain annotations, not nodes.
+        if not target_raw or relation in {"", "ND", "SELF"}:
+          continue
+        target_parts = [x.strip() for x in target_raw.split(";") if x.strip()]
+        targets = [references[play].get(norm(x)) for x in target_parts]
+        if not targets or any(x is None for x in targets):
+          continue
+        for target in targets:
+          if target == speaker:
+            continue
+          key = (play, speaker, target, relation, "TARA_UTTERANCE_ANNOTATION")
+          grouped[key]["ids"].append(clean(row[ix["Speech_ID"]]) if "Speech_ID" in ix else "")
+          grouped[key]["contexts"].append(clean(row[ix["Primary_Text"]])[:220] if "Primary_Text" in ix else "")
+    for (play, source, target, relation, evidence_type), info in sorted(grouped.items()):
+      ids = list(dict.fromkeys(x for x in info["ids"] if x))
+      rows_out.append([play, source, target, relation, evidence_type, len(ids),
+                       "; ".join(ids[:10]), " || ".join(info["contexts"][:2]),
+                       "Existing utterance-level annotation mapped to known character endpoints; review source QA and context."])
+
+  source_wb.close()
+  wb = openpyxl.load_workbook(output_path)
+  for sheet_name in ["Semantic_Relation_Edges", "Graph_Export_Index"]:
+    if sheet_name in wb.sheetnames:
+      del wb[sheet_name]
+  ws = wb.create_sheet("Semantic_Relation_Edges")
+  wb.create_sheet("Graph_Export_Index")
+  ws.append(["Play", "Source character", "Target character", "Annotated/documented relation",
+             "Evidence type", "Evidence count", "Example Speech_IDs", "Source evidence/context",
+             "Interpretation"])
+  for row in rows_out:
+    ws.append(row)
+  ws.freeze_panes = "A2"
+  ws.auto_filter.ref = ws.dimensions
+  for col, width in enumerate([22, 22, 22, 28, 34, 15, 40, 75, 75], 1):
+    ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
+  wb.save(output_path)
+  return rows_out
+
+
+def _draw_network(graph, output_path, title, edge_labels=None, directed=False):
+  """Save a readable static graph; never infer missing semantic edges."""
+  fig, ax = plt.subplots(figsize=(10, 7))
+  ax.set_title(title, fontsize=13, pad=18)
+  ax.axis("off")
+  if graph.number_of_nodes() == 0:
+    ax.text(0.5, 0.5, "No supported graph edges available", ha="center", va="center")
+  else:
+    pos = nx.spring_layout(graph, seed=19, k=1.25)
+    nx.draw_networkx_nodes(graph, pos, ax=ax, node_size=1700, alpha=0.9)
+    nx.draw_networkx_labels(graph, pos, ax=ax, font_size=8)
+    widths = []
+    for _, _, data in graph.edges(data=True):
+      widths.append(1.0 + min(float(data.get("weight", 1)), 8) * 0.35)
+    edge_kwargs = {"width": widths, "alpha": 0.65}
+    if directed:
+      edge_kwargs.update({"arrows": True, "arrowsize": 16, "connectionstyle": "arc3,rad=0.06"})
+    nx.draw_networkx_edges(graph, pos, ax=ax, **edge_kwargs)
+    if edge_labels:
+      nx.draw_networkx_edge_labels(graph, pos, edge_labels=edge_labels, ax=ax, font_size=7)
+  fig.tight_layout()
+  fig.savefig(output_path, dpi=180, bbox_inches="tight")
+  plt.close(fig)
+
+
+def export_play_graphs(output_path, graph_dir, semantic_rows):
+  """Export separate interaction and semantic-evidence graphs for both plays."""
+  wb = openpyxl.load_workbook(output_path, read_only=True, data_only=True)
+  nodes = list(wb["Interaction_Graph_Nodes"].iter_rows(min_row=2, values_only=True))
+  interaction_edges = list(wb["Turn_Transition_Edges"].iter_rows(min_row=2, values_only=True))
+  graph_dir.mkdir(parents=True, exist_ok=True)
+  index_rows = []
+  for play in ["Tara", "Dance Like a Man"]:
+    ig = nx.Graph()
+    for row in nodes:
+      if row[0] == play:
+        ig.add_node(clean(row[1]))
+    for row in interaction_edges:
+      if row[0] == play:
+        a, b, weight = clean(row[1]), clean(row[2]), int(row[3] or 0)
+        ig.add_edge(a, b, weight=weight)
+    interaction_path = graph_dir / (("tara" if play == "Tara" else "dance_like_a_man") + "_interaction_graph.png")
+    _draw_network(ig, interaction_path,
+                  f"{play} — adjacent speaker-turn interaction\n(Not a semantic relationship graph)")
+    index_rows.append([play, "Interaction graph", str(interaction_path.relative_to(output_path.parent)),
+                       ig.number_of_nodes(), ig.number_of_edges(),
+                       "Edges count consecutive annotated speaker turns within the same Act."])
+
+    # Semantic edges are sourced only from explicit corpus notes or existing
+    # Tara annotation labels; these two evidence types remain visibly distinct.
+    sg = nx.Graph() if play == "Tara" else nx.DiGraph()
+    relation_labels = {}
+    relevant = [r for r in semantic_rows if r[0] == play]
+    if play == "Tara":
+      relevant = [r for r in relevant if r[4] == "TARA_UTTERANCE_ANNOTATION"]
+    else:
+      relevant = [r for r in relevant if r[4] == "CORPUS_DOCUMENTED_NOTE"]
+    for row in relevant:
+      _, a, b, relation, evidence_type, count, speech_ids, context, interpretation = row
+      sg.add_edge(a, b, weight=int(count or 1))
+      label = f"{relation} (n={count})"
+      if (a, b) in relation_labels:
+        relation_labels[(a, b)] += "\n" + label
+      else:
+        relation_labels[(a, b)] = label
+    rel_path = graph_dir / (("tara" if play == "Tara" else "dance_like_a_man") + "_relationship_evidence_graph.png")
+    subtitle = ("Existing utterance annotations; not independently verified" if play == "Tara"
+                else "Explicit CHARACTER_MASTER notes; not a complete graph")
+    _draw_network(sg, rel_path, f"{play} — semantic relationship evidence\n({subtitle})",
+                  edge_labels=relation_labels, directed=(play != "Tara"))
+    index_rows.append([play, "Relationship evidence graph", str(rel_path.relative_to(output_path.parent)),
+                       sg.number_of_nodes(), sg.number_of_edges(), subtitle])
+
+  wb.close()
+  out_wb = openpyxl.load_workbook(output_path)
+  idx = out_wb["Graph_Export_Index"]
+  idx.append(["Play", "Graph type", "PNG file", "Nodes", "Edges", "Interpretation"])
+  for row in index_rows:
+    idx.append(row)
+  idx.freeze_panes = "A2"
+  idx.auto_filter.ref = idx.dimensions
+  for col, width in enumerate([22, 28, 90, 12, 12, 70], 1):
+    idx.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
+  out_wb.save(output_path)
+  return index_rows
+
 
 def main():
   ap = argparse.ArgumentParser()
@@ -201,7 +496,15 @@ def main():
   if not corpus.exists():
     raise SystemExit(f"Corpus workbook not found: {corpus}")
 
-  nlp = spacy.load("en_core_web_sm")
+  try:
+    nlp = spacy.load(os.environ.get("LITMIND_SPACY_MODEL", "en_core_web_sm"))
+    ner_available = True
+  except OSError:
+    # Keep the corpus-annotated speaker, alias, interaction, and documented-relation
+    # outputs usable even if the optional spaCy model is not installed.
+    nlp = None
+    ner_available = False
+    print("WARNING: spaCy model en_core_web_sm not found; NER surface counts will be skipped.")
   source = openpyxl.load_workbook(corpus, read_only=True, data_only=True)
   if "CHARACTER_MASTER" not in source.sheetnames or "UTTERANCE_CORPUS" not in source.sheetnames:
     raise SystemExit("Workbook must contain CHARACTER_MASTER and UTTERANCE_CORPUS sheets.")
@@ -249,8 +552,6 @@ def main():
         "text": clean(row[ui["Speech_OCR"]]),
         "qa_flag": clean(row[ui["QA_Flag"]]),
       })
-  source.close()
-
   result = openpyxl.Workbook()
   summary = result.active
   summary.title = "Summary"
@@ -283,17 +584,22 @@ def main():
                    "Interpretation"])
   target_evidence_ws = result.create_sheet("Speaker_Target_Evidence")
   target_evidence_ws.append(["Play", "Speaking character", "Mentioned character", "Matched alias",
-                             "Speech_ID", "Source QA flag", "Lexical cue categories (candidate only)", "Context",
-                             "Evidence status"])
+                             "Speech_ID", "Source QA flag", "Lexical cue categories near alias (candidate only)", "Context",
+                             "Evidence status / quality screen"])
   relation_summary_ws = result.create_sheet("Relationship_Candidate_Summary")
-  relation_summary_ws.append(["Play", "Character A", "Character B", "Evidence utterances",
-                              "Cue categories observed", "Example Speech_IDs", "Interpretation"])
+  relation_summary_ws.append(["Play", "Character A", "Character B", "Reviewable name-mention utterances",
+                              "Cue categories near alias (candidate only)", "Example Speech_IDs",
+                              "Excluded metadata/stage-direction mentions", "Interpretation"])
+  excluded_ws = result.create_sheet("Excluded_Low_Quality_Evidence")
+  excluded_ws.append(["Play", "Speaking character", "Mentioned character", "Matched alias",
+                      "Speech_ID", "Quality flag", "Context"])
   notes_ws = result.create_sheet("Methodology_Notes")
   notes_ws.append(["Topic", "Decision / limitation"])
   notes_ws.append(["Character reference", "CHARACTER_MASTER plus UTTERANCE_CORPUS annotated Speaker column are the reference for the two supplied plays; this is not an automatic speaker-diarization test."])
-  notes_ws.append(["NER", "spaCy PERSON detections are candidate mentions. Missing or incorrect detections remain possible; literal alias hits are separately listed for review."])
+  notes_ws.append(["NER", "spaCy PERSON detections are candidate mentions. Missing or incorrect detections remain possible; literal alias hits are separately listed for review. If en_core_web_sm is unavailable, NER counts are skipped while corpus-annotated speaker and evidence outputs are still generated."])
   notes_ws.append(["Interaction graph", "Turn_Transition_Edges counts consecutive utterance rows with different known speakers within the same Act. This is a dialogue-turn transition graph, not a semantic relationship graph."])
-  notes_ws.append(["Relationship candidates", "Speaker_Target_Evidence links an annotated speaker to another reference character named in that utterance. Cue categories are lexical hints only and require context review; they are not confirmed relation labels."])
+  notes_ws.append(["Relationship candidates", "Speaker_Target_Evidence links an annotated speaker to another reference character named in that utterance. Cue words are reported only near the matched alias; they remain lexical hints, not confirmed relation labels."])
+  notes_ws.append(["Evidence quality screen", "Title/byline/copyright contexts are excluded from Relationship_Candidate_Summary. Likely stage-direction contexts are moved to Excluded_Low_Quality_Evidence for review. This conservative heuristic can still miss or misclassify contexts; it is not a human gold-standard annotation."])
   notes_ws.append(["Corpus quality", "Each evidence row retains the source QA_Flag. OCR and stage directions may still be mixed into Speech_OCR; flagged material should be reviewed before evaluation."])
   notes_ws.append(["Scope", "The adapter is currently tested against Tara and Dance Like a Man. Support for arbitrary plays is not established by these two cases alone."])
   notes_ws.append(["Record-count discrepancy", "The workbook's CORPUS_SUMMARY reports 993 Dance Like a Man turns, while UTTERANCE_CORPUS contains 996 rows for that play. This adapter analyzes the 996 UTTERANCE_CORPUS rows and does not silently reconcile the discrepancy."])
@@ -346,22 +652,28 @@ def main():
     # Mention evidence: the annotated speaker says a known character's name/alias.
     # Cue categories are weak lexical candidates and must not be treated as gold labels.
     pair_evidence = defaultdict(list)
+    excluded_counts = Counter()
     for row in rows:
       for item in target_mentions_in_turn(play, row, ref_names, label_to_character):
         cues = item["cue_categories"]
+        quality = item["quality"]
         target_evidence_ws.append([
           play, item["source"], item["target"], item["alias"], item["speech_id"], row["qa_flag"],
-          "; ".join(cues), item["context"],
-          "Name mention by annotated speaker; cue tags are lexical candidates only, not confirmed relationships."
+          "; ".join(cues), item["context"], quality
         ])
         key = tuple(sorted([item["source"], item["target"]], key=str.casefold))
-        pair_evidence[key].append(item)
+        if quality.startswith("REVIEWABLE_NAME_MENTION"):
+          pair_evidence[key].append(item)
+        else:
+          excluded_counts[key] += 1
+          excluded_ws.append([play, item["source"], item["target"], item["alias"],
+                              item["speech_id"], quality, item["context"]])
     for (a, b), items in sorted(pair_evidence.items()):
       cue_union = sorted({cue for item in items for cue in item["cue_categories"]})
       ids = list(dict.fromkeys(item["speech_id"] for item in items))[:8]
       relation_summary_ws.append([
-        play, a, b, len(items), "; ".join(cue_union), "; ".join(ids),
-        "Candidate evidence from name-mention utterances; review contexts before assigning any relationship label."
+        play, a, b, len(items), "; ".join(cue_union), "; ".join(ids), excluded_counts[(a, b)],
+        "Reviewable name-mention evidence only; NOT a confirmed relation. Manually verify semantic meaning."
       ])
 
     for name in ref_names:
@@ -377,16 +689,17 @@ def main():
     examples = {}
     # NER is used for name-mention candidates only; the annotated Speaker field is the
     # primary source for who is speaking in a given utterance.
-    for row in rows:
-      doc = nlp(row["text"])
-      for ent in doc.ents:
-        if ent.label_ != "PERSON":
-          continue
-        surface = clean(ent.text).strip(" .,'’")
-        if not surface:
-          continue
-        surfaces[surface] += 1
-        examples.setdefault(surface, ent.sent.text[:300])
+    if nlp is not None:
+      for row in rows:
+        doc = nlp(row["text"])
+        for ent in doc.ents:
+          if ent.label_ != "PERSON":
+            continue
+          surface = clean(ent.text).strip(" .,'’")
+          if not surface:
+            continue
+          surfaces[surface] += 1
+          examples.setdefault(surface, ent.sent.text[:300])
 
     mapped_surfaces = {}
     for surface in surfaces:
@@ -438,6 +751,16 @@ def main():
       len(distinct_mapped), action_flag_count
     ])
 
+  documented_ws = result.create_sheet("Corpus_Documented_Relations")
+  documented_ws.append(["Play", "Character A", "Character B", "Relation", "Source note", "Source field", "Interpretation"])
+  for relation_row in build_corpus_documented_relations(master_rows, master_headers):
+    documented_ws.append(relation_row)
+  documented_ws.append(["Tara", "", "", "NOT A COMPLETE PAIRWISE GRAPH",
+                       "Tara has utterance-level target/relation annotations, not a complete character-pair relation inventory.",
+                       "TARA_FULL_ANNOTATION_V4",
+                       "See Tara_Annotation_Evidence for existing annotations; do not treat them as a complete social graph."])
+  source.close()
+
   for ws in result.worksheets:
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
@@ -448,6 +771,10 @@ def main():
 
   xlsx = out.with_suffix(".xlsx")
   result.save(xlsx)
+  add_tara_annotation_evidence(corpus, xlsx)
+  semantic_rows = build_semantic_relation_edges(corpus, xlsx)
+  graph_dir = out.parent / (out.stem + "_graphs")
+  graph_index = export_play_graphs(xlsx, graph_dir, semantic_rows)
   print("\nLITMIND PLAY CHARACTER ADAPTER COMPLETE")
   print("Frozen nlp_processor.py and prev.py were not imported or modified.")
   print(f"Report: {xlsx.resolve()}")
@@ -461,10 +788,28 @@ def main():
     print(f"{play}: turn-transition edges={edge_count}, relationship candidate pairs for review={candidate_count}")
   print("\nAdded graph/evidence sheets:")
   print("  Interaction_Graph_Nodes + Turn_Transition_Edges: adjacent annotated speaker turns only.")
-  print("  Speaker_Target_Evidence + Relationship_Candidate_Summary: name-mention and lexical-cue candidates only.")
+  print("  Speaker_Target_Evidence + Relationship_Candidate_Summary: quality-screened name-mention candidates only.")
+  print("  Excluded_Low_Quality_Evidence: title/byline/copyright or likely stage-direction contexts removed from candidate summaries.")
   print("  Alias_Mention_Candidates: literal alias hits with Speech_ID and context.")
+  print("  Corpus_Documented_Relations: pairwise relations explicitly stated in CHARACTER_MASTER notes.")
+  print("  Tara_Annotation_Evidence: existing utterance-level annotations, not a complete social-relation graph.")
+  print("\nCHARACTERS")
+  for play in ["Tara", "Dance Like a Man"]:
+    names = [name for (p, name) in characters if p == play]
+    print(f"  {play}: {', '.join(names)}")
+  print("\nGRAPHS")
+  for row in graph_index:
+    print(f"  {row[0]} | {row[1]}: {row[3]} nodes, {row[4]} edges -> {row[2]}")
+  print("\nRELATIONSHIP EVIDENCE")
+  for play in ["Tara", "Dance Like a Man"]:
+    subset = [r for r in semantic_rows if r[0] == play]
+    print(f"  {play}: {len(subset)} evidence edges (annotation/documented evidence; not automatically confirmed truth)")
+    for r in subset[:12]:
+      print(f"    {r[1]} --[{r[3]}]--> {r[2]} (source={r[4]}, evidence_count={r[5]})")
+    if len(subset) > 12:
+      print(f"    ... {len(subset)-12} more evidence edges in Semantic_Relation_Edges sheet")
   print("\nImportant: Speaker_Reference uses the corpus's annotated Speaker column. "
-        "NER_Candidates are mentions to review, not proof of relationships; no candidate sheet is a gold-standard relation graph.")
+        "Interaction edges are adjacent turns, not semantic relations. Semantic edges use existing annotation/documented evidence only.")
 
 if __name__ == "__main__":
   main()
