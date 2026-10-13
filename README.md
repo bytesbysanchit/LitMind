@@ -32,9 +32,9 @@ Current Progress:
 * [X] Character Extraction
 * [X] Character Relationship Graph
 * [X] Sentiment Analysis
-* [ ] AI Summary
 * [ ] Streamlit Dashboard
 * [ ] Deployment
+* [ ] AI Summary
 
 ## 📅 Roadmap
 
