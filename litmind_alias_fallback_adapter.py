@@ -1,238 +1,161 @@
+"""LitMind all-character alias fallback adapter v2.
+
+Safe, separate diagnostic/candidate-recovery layer. It does NOT import or edit
+src/nlp_processor.py or prev.py, and never treats a raw alias match as verified truth.
+
+Input workbook sheets: CHARACTER_MASTER, UTTERANCE_CORPUS
+Output: Excel report + candidate CSV.
+Requires pandas, openpyxl, spaCy, and the chosen spaCy model in the current environment.
 """
-LitMind — All-Character Alias Fallback Adapter
-==============================================
-A separate diagnostic adapter. Does NOT import or modify nlp_processor.py or prev.py.
-
-Reads:
-  Dattani_Tara_Corpus_Final.xlsx
-  sheets CHARACTER_MASTER and UTTERANCE_CORPUS
-
-Writes:
-  reports/character_alias_fallback_comparison.xlsx
-  reports/character_alias_fallback_candidates.csv
-
-Important:
-- spaCy PERSON output is preserved as baseline.
-- Alias matches are candidate mentions, not automatically verified character mentions.
-- This script does not claim accuracy/precision/recall/F1 without independent gold labels.
-- Dialogue vs stage-direction classification is heuristic and flagged as such.
-"""
+from __future__ import annotations
+import argparse, re
 from pathlib import Path
-import argparse
-import re
 import pandas as pd
 import spacy
 from spacy.matcher import PhraseMatcher
 
+STAGE_CUES = re.compile(r"\b(turns? to|slowly comes|walks?|enters?|exits?|sits?|stands?|lies down|looks? at|moves? to|crosses?|dances?|pause|silence|blackout|lights? fade|stage direction)\b", re.I)
+META_CUES = re.compile(r"\b(title|copyright|written by|author|novel|manuscript|book|playwright|publisher|published|address)\b", re.I)
 
-def safe_text(value):
-    return "" if pd.isna(value) else str(value)
+
+def txt(v):
+    return "" if pd.isna(v) else str(v).strip()
 
 
-def classify_context(text):
-    """Heuristic only; never treat this as verified annotation."""
-    t = text.strip()
-    if not t:
-        return "EMPTY"
-    if re.search(r"[\(\[].{0,500}[\)\]]", t, flags=re.S):
-        return "MIXED_OR_BRACKETED"
-    stage_verbs = (
-        "turns to", "slowly comes", "walks", "enters", "exits", "sits",
-        "stands", "lies down", "looks at", "moves to", "crosses", "dances",
-        "stage direction", "lights", "blackout", "pause", "silence"
-    )
-    low = t.lower()
-    if any(v in low for v in stage_verbs) and not re.search(r'["“”]', t):
-        return "POSSIBLE_STAGE_DIRECTION"
-    return "DIALOGUE_OR_UNCLEAR"
+def classify_candidate(text: str, start: int, end: int, has_multiple_chars: bool):
+    """Conservative heuristic flags; all matches still require review."""
+    left, right = max(0, start - 100), min(len(text), end + 100)
+    window = text[left:right]
+    prefix = text[max(0, start - 180):start]
+    # Is the mention inside round/square brackets, based on nearest unmatched opener.
+    last_open = max(text.rfind("(", 0, start), text.rfind("[", 0, start))
+    last_close = max(text.rfind(")", 0, start), text.rfind("]", 0, start))
+    in_brackets = last_open > last_close
+    meta = bool(META_CUES.search(window))
+    stage = in_brackets or bool(STAGE_CUES.search(window))
+    if meta:
+        tier = "LOW_PRIORITY_METADATA_OR_TITLE_REVIEW"
+    elif stage:
+        tier = "STAGE_DIRECTION_OR_MIXED_REVIEW"
+    elif has_multiple_chars:
+        tier = "MULTI_CHARACTER_DIALOGUE_REVIEW"
+    else:
+        tier = "DIALOGUE_OR_UNCLEAR_REVIEW"
+    flags=[]
+    if in_brackets: flags.append("MENTION_INSIDE_BRACKETS")
+    if STAGE_CUES.search(window): flags.append("STAGE_CUE_NEAR_MENTION")
+    if meta: flags.append("POSSIBLE_TITLE_OR_METADATA_CONTEXT")
+    if has_multiple_chars: flags.append("MULTIPLE_CANONICAL_NAMES_IN_UTTERANCE")
+    if not flags: flags.append("NO_SIMPLE_HEURISTIC_FLAG")
+    return tier, ";".join(flags), window
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input", default="Dattani_Tara_Corpus_Final.xlsx")
-    parser.add_argument("--output", default="reports/character_alias_fallback_comparison.xlsx")
-    parser.add_argument("--model", default="en_core_web_sm")
-    args = parser.parse_args()
-
-    input_path = Path(args.input)
-    output_path = Path(args.output)
-    if not input_path.exists():
-        raise FileNotFoundError(f"Corpus workbook not found: {input_path.resolve()}")
-
-    characters = pd.read_excel(input_path, sheet_name="CHARACTER_MASTER")
-    utterances = pd.read_excel(input_path, sheet_name="UTTERANCE_CORPUS")
-    req_c = {"Character_ID", "Play_ID", "Character_Name"}
-    req_u = {"Speech_ID", "Play_ID", "Play", "Speech_OCR", "QA_Flag"}
-    if not req_c.issubset(characters.columns):
-        raise ValueError(f"CHARACTER_MASTER missing: {sorted(req_c-set(characters.columns))}")
-    if not req_u.issubset(utterances.columns):
-        raise ValueError(f"UTTERANCE_CORPUS missing: {sorted(req_u-set(utterances.columns))}")
-
-    nlp = spacy.load(args.model)
-    matcher = PhraseMatcher(nlp.vocab, attr="LOWER")
-    match_lookup = {}
-    valid_chars = []
-    for _, row in characters.iterrows():
-        name = safe_text(row["Character_Name"]).strip()
-        if not name or name.lower() == "nan":
-            continue
-        # Match whole token sequences, not arbitrary substrings (Dan won't match inside Chandan).
-        key = f"LITMIND_CHAR_{row['Play_ID']}_{row['Character_ID']}"
-        matcher.add(key, [nlp.make_doc(name)])
-        match_lookup[nlp.vocab.strings[key]] = {
-            "Character_ID": safe_text(row["Character_ID"]),
-            "Play_ID": safe_text(row["Play_ID"]),
-            "Character": name,
-        }
-        valid_chars.append({
-            "Character_ID": safe_text(row["Character_ID"]),
-            "Play_ID": safe_text(row["Play_ID"]),
-            "Character": name,
-        })
-
-    utterances = utterances.copy()
-    utterances["Play_ID_norm"] = utterances["Play_ID"].map(safe_text)
-    detail_rows = []
-    candidate_rows = []
-    texts = [safe_text(x) for x in utterances["Speech_OCR"]]
-
-    for (_, utt), doc in zip(utterances.iterrows(), nlp.pipe(texts, batch_size=32)):
-        play_id = safe_text(utt["Play_ID"])
-        ents = [(e.text, e.label_, e.start, e.end) for e in doc.ents]
-        person_ents = [e for e in doc.ents if e.label_ == "PERSON"]
-        alias_matches = []
-        for match_id, start, end in matcher(doc):
-            char = match_lookup[match_id]
-            if char["Play_ID"] != play_id:
-                continue
-            alias_matches.append((char, start, end))
-
-        # Keep baseline NER and alias candidates separate. A row represents one canonical alias hit.
-        for char, start, end in alias_matches:
-            exact = any(e.start == start and e.end == end for e in person_ents)
-            overlap = any(e.start < end and e.end > start for e in person_ents)
-            span = doc[start:end]
-            row = {
-                "Speech_ID": safe_text(utt["Speech_ID"]),
-                "Play_ID": play_id,
-                "Play": safe_text(utt["Play"]),
-                "Character_ID": char["Character_ID"],
-                "Character": char["Character"],
-                "Matched_Surface": span.text,
-                "Baseline_PERSON_Entities": "; ".join(f"{e.text}:{e.label_}" for e in doc.ents),
-                "Baseline_Exact_PERSON": bool(exact),
-                "Baseline_PERSON_Overlap": bool(overlap),
-                "Alias_Fallback_Candidate": True,
-                "Candidate_Recovery_vs_Exact_PERSON": not exact,
-                "Context_Heuristic": classify_context(doc.text),
-                "QA_Flag": safe_text(utt.get("QA_Flag", "")),
-                "Text_Context": doc.text,
-            }
-            detail_rows.append(row)
-            candidate_rows.append({
-                "Speech_ID": row["Speech_ID"],
-                "Play_ID": play_id,
-                "Play": row["Play"],
-                "Character_ID": char["Character_ID"],
-                "Character_Candidate": char["Character"],
-                "Evidence_Type": "CANONICAL_ALIAS_MATCH",
-                "Baseline_NER_Label_For_Exact_Surface": next(
-                    (e.label_ for e in doc.ents if e.start == start and e.end == end), ""
-                ),
-                "Baseline_Exact_PERSON": bool(exact),
-                "Context_Heuristic": row["Context_Heuristic"],
-                "Needs_Context_Review": True,
-                "QA_Flag": row["QA_Flag"],
-                "Text_Context": doc.text,
+    ap=argparse.ArgumentParser()
+    ap.add_argument('--input', default='Dattani_Tara_Corpus_Final.xlsx')
+    ap.add_argument('--output', default='reports/character_alias_fallback_v2.xlsx')
+    ap.add_argument('--model', default='en_core_web_sm')
+    args=ap.parse_args()
+    inp=Path(args.input); out=Path(args.output)
+    if not inp.exists(): raise FileNotFoundError(f'Workbook not found: {inp.resolve()}')
+    chars=pd.read_excel(inp, sheet_name='CHARACTER_MASTER')
+    utt=pd.read_excel(inp, sheet_name='UTTERANCE_CORPUS')
+    reqc={'Character_ID','Play_ID','Character_Name'}
+    requ={'Speech_ID','Play_ID','Play','Speech_OCR','QA_Flag'}
+    if not reqc.issubset(chars.columns): raise ValueError(f'CHARACTER_MASTER missing columns: {reqc-set(chars.columns)}')
+    if not requ.issubset(utt.columns): raise ValueError(f'UTTERANCE_CORPUS missing columns: {requ-set(utt.columns)}')
+    if utt['Speech_ID'].duplicated().any():
+        duplicate_ids=utt.loc[utt['Speech_ID'].duplicated(keep=False),'Speech_ID'].astype(str).tolist()
+    else: duplicate_ids=[]
+    nlp=spacy.load(args.model)
+    matcher=PhraseMatcher(nlp.vocab, attr='LOWER')
+    lookup={}; valid=[]
+    for _,r in chars.iterrows():
+        name=txt(r['Character_Name']); pid=txt(r['Play_ID']); cid=txt(r['Character_ID'])
+        if not name: continue
+        key=f'LITMIND_ALIAS_{pid}_{cid}'
+        matcher.add(key,[nlp.make_doc(name)])
+        lookup[nlp.vocab.strings[key]]={'Character_ID':cid,'Play_ID':pid,'Character':name}
+        valid.append({'Character_ID':cid,'Play_ID':pid,'Character':name})
+    docs=nlp.pipe([txt(x) for x in utt['Speech_OCR']],batch_size=32)
+    rows=[]
+    for (_,u),doc in zip(utt.iterrows(),docs):
+        pid=txt(u['Play_ID']); text=doc.text
+        all_mentions=[]
+        for mid,s,e in matcher(doc):
+            c=lookup[mid]
+            if c['Play_ID'] != pid: continue
+            all_mentions.append((c,s,e))
+        unique_char_count=len({x[0]['Character_ID'] for x in all_mentions})
+        ents=list(doc.ents); persons=[e for e in ents if e.label_=='PERSON']
+        for c,s,e in all_mentions:
+            span=doc[s:e]
+            exact=any(x.start==s and x.end==e and x.label_=='PERSON' for x in ents)
+            overlap=any(x.start<e and x.end>s and x.label_=='PERSON' for x in ents)
+            tier,flags,window=classify_candidate(text,span.start_char,span.end_char,unique_char_count>1)
+            rows.append({
+                'Speech_ID':txt(u['Speech_ID']),'Play_ID':pid,'Play':txt(u['Play']),
+                'Character_ID':c['Character_ID'],'Character_Candidate':c['Character'],
+                'Matched_Surface':span.text,'Start_Char':span.start_char,'End_Char':span.end_char,
+                'Baseline_NER_Entities':'; '.join(f'{x.text}:{x.label_}' for x in ents),
+                'Baseline_Exact_PERSON':bool(exact),'Baseline_PERSON_Overlap':bool(overlap),
+                'Alias_Fallback_Candidate':True,'Candidate_Not_Exact_PERSON':not exact,
+                'Review_Priority':tier,'Safeguard_Flags':flags,'Local_Context_Window':window,
+                'QA_Flag':txt(u.get('QA_Flag','')),
+                'Decision': 'REVIEW_REQUIRED — DO NOT AUTO-ACCEPT',
             })
+    detail=pd.DataFrame(rows)
+    if detail.empty:
+        detail=pd.DataFrame(columns=['Speech_ID','Play_ID','Play','Character_ID','Character_Candidate','Matched_Surface','Start_Char','End_Char','Baseline_NER_Entities','Baseline_Exact_PERSON','Baseline_PERSON_Overlap','Alias_Fallback_Candidate','Candidate_Not_Exact_PERSON','Review_Priority','Safeguard_Flags','Local_Context_Window','QA_Flag','Decision'])
+    summary=[]
+    for c in valid:
+        sub=detail[(detail.Character_ID==c['Character_ID'])&(detail.Play_ID==c['Play_ID'])]
+        summary.append({'Play_ID':c['Play_ID'],'Character_ID':c['Character_ID'],'Character':c['Character'],
+            'Alias_Candidate_Occurrences':len(sub),'Unique_Utterances':sub.Speech_ID.nunique() if len(sub) else 0,
+            'Baseline_Exact_PERSON_Matches':int(sub.Baseline_Exact_PERSON.sum()) if len(sub) else 0,
+            'Alias_Only_Candidates':int(sub.Candidate_Not_Exact_PERSON.sum()) if len(sub) else 0,
+            'Review_Required_Count':len(sub),'Interpretation':'Diagnostic counts only; not accuracy or verified mentions.'})
+    char_summary=pd.DataFrame(summary)
+    priority=(detail.groupby(['Play_ID','Review_Priority'],dropna=False).agg(Candidate_Occurrences=('Speech_ID','size'),Unique_Utterances=('Speech_ID','nunique')).reset_index() if len(detail) else pd.DataFrame(columns=['Play_ID','Review_Priority','Candidate_Occurrences','Unique_Utterances']))
+    context=(detail.groupby(['Play_ID','Safeguard_Flags'],dropna=False).size().reset_index(name='Candidate_Occurrences') if len(detail) else pd.DataFrame(columns=['Play_ID','Safeguard_Flags','Candidate_Occurrences']))
+    overview=pd.DataFrame([
+        ('Utterance rows processed',len(utt)),('Characters in master',len(valid)),('Alias occurrence candidates',len(detail)),
+        ('Unique utterances with candidates',int(detail.Speech_ID.nunique()) if len(detail) else 0),
+        ('Baseline exact PERSON matches among alias occurrences',int(detail.Baseline_Exact_PERSON.sum()) if len(detail) else 0),
+        ('Alias-only candidates',int(detail.Candidate_Not_Exact_PERSON.sum()) if len(detail) else 0),
+        ('Candidates requiring review',len(detail)),('Duplicate Speech_ID rows in corpus',len(duplicate_ids)),
+        ('NER model',args.model),('spaCy version',spacy.__version__),
+        ('Metric restriction','No accuracy/precision/recall/F1: no independent mention-level gold set.'),
+        ('Safety policy','Alias matches are candidates only; no candidate is auto-accepted.'),
+        ('Protected files','src/nlp_processor.py and prev.py are not imported or modified.'),
+    ],columns=['Metric','Value'])
+    methodology=pd.DataFrame([
+        ('Alias matching','Case-insensitive PhraseMatcher token-sequence matching of canonical CHARACTER_MASTER names, scoped by Play_ID.'),
+        ('Substring safeguard','Token-sequence matching avoids substring matches such as Dan inside Chandan.'),
+        ('Baseline','Fresh spaCy entities from the selected model; exact and overlapping PERSON spans reported separately.'),
+        ('Review safeguards','Bracket/stage cues, title/metadata cues, and multiple character names are flagged for review.'),
+        ('No auto-accept','Every alias match remains REVIEW_REQUIRED. Heuristics are triage flags, not truth labels.'),
+        ('Limitations','Canonical names only; nicknames/variants need a reviewed alias dictionary. OCR errors may evade exact matching.'),
+        ('Evaluation','Independent verified gold mentions are required before precision/recall/F1/accuracy claims.'),
+    ],columns=['Item','Detail'])
+    out.parent.mkdir(parents=True,exist_ok=True)
+    csvout=out.with_name(out.stem+'_candidates.csv')
+    with pd.ExcelWriter(out,engine='openpyxl') as w:
+        overview.to_excel(w,sheet_name='Summary',index=False)
+        char_summary.to_excel(w,sheet_name='Character_Summary',index=False)
+        priority.to_excel(w,sheet_name='Review_Priority',index=False)
+        context.to_excel(w,sheet_name='Safeguard_Flags',index=False)
+        detail.to_excel(w,sheet_name='Candidate_Review_Queue',index=False)
+        methodology.to_excel(w,sheet_name='Methodology',index=False)
+    detail.to_csv(csvout,index=False,encoding='utf-8-sig')
+    print('LITMIND ALIAS FALLBACK ADAPTER V2 COMPLETE')
+    print(f'Utterances processed: {len(utt)}')
+    print(f'Characters: {len(valid)}')
+    print(f'Alias occurrence candidates: {len(detail)}')
+    print(f'Baseline exact PERSON matches: {int(detail.Baseline_Exact_PERSON.sum()) if len(detail) else 0}')
+    print(f'Alias-only candidates: {int(detail.Candidate_Not_Exact_PERSON.sum()) if len(detail) else 0}')
+    print(f'Excel report: {out.resolve()}')
+    print(f'Candidate CSV: {csvout.resolve()}')
+    print('All matches remain review candidates; diagnostic only, not an accuracy score.')
 
-    detail_cols = [
-        "Speech_ID","Play_ID","Play","Character_ID","Character","Matched_Surface",
-        "Baseline_PERSON_Entities","Baseline_Exact_PERSON","Baseline_PERSON_Overlap",
-        "Alias_Fallback_Candidate","Candidate_Recovery_vs_Exact_PERSON",
-        "Context_Heuristic","QA_Flag","Text_Context"
-    ]
-    detail = pd.DataFrame(detail_rows, columns=detail_cols)
-    candidates = pd.DataFrame(candidate_rows)
-    if candidates.empty:
-        candidates = pd.DataFrame(columns=[
-            "Speech_ID","Play_ID","Play","Character_ID","Character_Candidate","Evidence_Type",
-            "Baseline_NER_Label_For_Exact_Surface","Baseline_Exact_PERSON","Context_Heuristic",
-            "Needs_Context_Review","QA_Flag","Text_Context"
-        ])
-
-    summaries = []
-    for char in valid_chars:
-        sub = detail[
-            (detail["Character_ID"] == char["Character_ID"]) &
-            (detail["Play_ID"].astype(str) == char["Play_ID"])
-        ] if len(detail) else detail
-        summaries.append({
-            "Play_ID": char["Play_ID"],
-            "Character_ID": char["Character_ID"],
-            "Character": char["Character"],
-            "Canonical_Alias_Occurrences": int(len(sub)),
-            "Unique_Utterances_With_Alias": int(sub["Speech_ID"].nunique()) if len(sub) else 0,
-            "Baseline_Exact_PERSON_Matches": int(sub["Baseline_Exact_PERSON"].sum()) if len(sub) else 0,
-            "Baseline_PERSON_Overlap_Matches": int(sub["Baseline_PERSON_Overlap"].sum()) if len(sub) else 0,
-            "Alias_Candidates_Not_Exact_PERSON": int(sub["Candidate_Recovery_vs_Exact_PERSON"].sum()) if len(sub) else 0,
-            "Alias_Candidates_Not_Exact_PERSON_Pct": round(100 * sub["Candidate_Recovery_vs_Exact_PERSON"].mean(), 2) if len(sub) else 0,
-            "Interpretation": "Diagnostic only; alias candidate is not a verified character mention."
-        })
-    summary = pd.DataFrame(summaries)
-
-    context_summary = (
-        detail.groupby(["Play_ID","Context_Heuristic"], dropna=False)
-        .agg(Alias_Candidate_Rows=("Speech_ID","size"),
-             Unique_Utterances=("Speech_ID","nunique"),
-             Not_Exact_PERSON=("Candidate_Recovery_vs_Exact_PERSON","sum"))
-        .reset_index()
-        if len(detail) else pd.DataFrame(columns=["Play_ID","Context_Heuristic","Alias_Candidate_Rows","Unique_Utterances","Not_Exact_PERSON"])
-    )
-
-    overview = pd.DataFrame([
-        ["Corpus utterance rows", len(utterances)],
-        ["Characters in CHARACTER_MASTER", len(valid_chars)],
-        ["Canonical alias candidate rows", len(detail)],
-        ["Unique utterances with at least one canonical alias", int(detail["Speech_ID"].nunique()) if len(detail) else 0],
-        ["Baseline exact PERSON matches among alias hits", int(detail["Baseline_Exact_PERSON"].sum()) if len(detail) else 0],
-        ["Alias candidates without exact PERSON match", int(detail["Candidate_Recovery_vs_Exact_PERSON"].sum()) if len(detail) else 0],
-        ["Alias candidates overlapping any PERSON entity", int(detail["Baseline_PERSON_Overlap"].sum()) if len(detail) else 0],
-        ["NER model", args.model],
-        ["Evaluation status", "DIAGNOSTIC ONLY — no independent gold labels; do not report as accuracy/precision/recall/F1"],
-        ["Fallback behavior", "Creates candidate mentions only; does not overwrite baseline NER or assert every match is a true character mention"],
-        ["Context classification", "Heuristic only; all candidate rows are marked for contextual review"],
-        ["Protected files", "nlp_processor.py and prev.py are not imported or modified"],
-    ], columns=["Metric","Value"])
-
-    methodology = pd.DataFrame([
-        ["Baseline", "Fresh spaCy entities from the selected model; only PERSON entities are considered for comparison."],
-        ["Fallback", "Case-insensitive whole-token-sequence matching of canonical names from CHARACTER_MASTER, scoped to the same Play_ID."],
-        ["Substring safety", "PhraseMatcher matches token sequences, so Dan is not matched as a substring inside Chandan."],
-        ["Interpretation", "Alias hits are candidates. Stage directions, mentions of other people, OCR noise, and context ambiguity may create false positives."],
-        ["No gold labels", "No precision, recall, F1, or overall accuracy is computed."],
-        ["Model dependency", f"The model '{args.model}' must be installed in the environment where this script is run."],
-    ], columns=["Item","Detail"])
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    csv_path = output_path.with_name("character_alias_fallback_candidates.csv")
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        overview.to_excel(writer, sheet_name="Summary", index=False)
-        summary.to_excel(writer, sheet_name="Character_Summary", index=False)
-        context_summary.to_excel(writer, sheet_name="Context_Breakdown", index=False)
-        detail.to_excel(writer, sheet_name="Alias_Mention_Details", index=False)
-        methodology.to_excel(writer, sheet_name="Methodology", index=False)
-    candidates.to_csv(csv_path, index=False, encoding="utf-8-sig")
-
-    print("LITMIND ALIAS FALLBACK ADAPTER COMPLETE")
-    print(f"Utterances processed: {len(utterances)}")
-    print(f"Characters: {len(valid_chars)}")
-    print(f"Canonical alias candidate rows: {len(detail)}")
-    print(f"Baseline exact PERSON matches: {int(detail['Baseline_Exact_PERSON'].sum()) if len(detail) else 0}")
-    print(f"Alias candidates not exact PERSON: {int(detail['Candidate_Recovery_vs_Exact_PERSON'].sum()) if len(detail) else 0}")
-    print(f"Excel report: {output_path.resolve()}")
-    print(f"Candidate CSV: {csv_path.resolve()}")
-    print("Diagnostic only: not an accuracy score.")
-
-if __name__ == "__main__":
-    main()
+if __name__=='__main__': main()
