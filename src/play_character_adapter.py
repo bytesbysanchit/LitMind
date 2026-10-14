@@ -12,6 +12,7 @@ from collections import Counter, defaultdict
 import argparse
 import os
 import re
+import textwrap
 import openpyxl
 import spacy
 import networkx as nx
@@ -339,11 +340,42 @@ def build_semantic_relation_edges(corpus_path, output_path):
     rows_out.append([play, a, b, relation, "CORPUS_DOCUMENTED_NOTE", 1, "",
                      note, "Documented in CHARACTER_MASTER.Notes; not independently gold-validated."])
 
-  # IMPORTANT: Tara's Target_Relation fields are utterance-level research annotations.
-  # They are preserved in Tara_Annotation_Evidence, but are NOT converted into
-  # speaker-target social-relation edges because the field semantics do not establish
-  # that the speaker and target are the two endpoints of a real-world relationship.
-  # This avoids unsupported/conflicting edges such as Bharati--SIBLINGS-->Chandan.
+  # Tara annotations are retained as annotation evidence, not asserted as verified
+  # real-world social relationships. Keep exact source/target/relation labels and
+  # aggregate repeated evidence; conflicting labels remain visible in the graph.
+  if "TARA_FULL_ANNOTATION_V4" in source_wb.sheetnames:
+    data = list(source_wb["TARA_FULL_ANNOTATION_V4"].iter_rows(values_only=True))
+    headers = [clean(x) for x in data[0]]
+    ix = {name: headers.index(name) for name in headers}
+    grouped = defaultdict(lambda: {"ids": [], "contexts": []})
+    for row in data[1:]:
+      play = play_key(row[ix["Play_ID"]], row[ix["Play"]]) if "Play_ID" in ix else "Tara"
+      if play != "Tara":
+        continue
+      speaker = references[play].get(norm(row[ix["Speaker"]])) if "Speaker" in ix else None
+      if not speaker:
+        continue
+      for target_col, rel_col in [("Masculinity_Target", "Target_Relation"),
+                                  ("Secondary_Target", "Secondary_Target_Relation")]:
+        target_raw = clean(row[ix[target_col]]) if target_col in ix else ""
+        relation = clean(row[ix[rel_col]]).upper() if rel_col in ix else ""
+        if not target_raw or relation in {"", "ND", "SELF"}:
+          continue
+        target_parts = [x.strip() for x in target_raw.split(";") if x.strip()]
+        targets = [references[play].get(norm(x)) for x in target_parts]
+        if not targets or any(x is None for x in targets):
+          continue
+        for target in targets:
+          if target == speaker:
+            continue
+          key = (play, speaker, target, relation, "TARA_ANNOTATION_EVIDENCE")
+          grouped[key]["ids"].append(clean(row[ix["Speech_ID"]]) if "Speech_ID" in ix else "")
+          grouped[key]["contexts"].append(clean(row[ix["Primary_Text"]])[:220] if "Primary_Text" in ix else "")
+    for (play, source, target, relation, evidence_type), info in sorted(grouped.items()):
+      ids = list(dict.fromkeys(x for x in info["ids"] if x))
+      rows_out.append([play, source, target, relation, evidence_type, len(ids),
+                       "; ".join(ids[:10]), " || ".join(info["contexts"][:2]),
+                       "Existing utterance-level annotation only; not independently verified as a social relationship."])
 
   source_wb.close()
   wb = openpyxl.load_workbook(output_path)
@@ -366,29 +398,71 @@ def build_semantic_relation_edges(corpus_path, output_path):
 
 
 def _draw_network(graph, output_path, title, edge_labels=None, directed=False):
-  """Save a readable static graph; never infer missing semantic edges."""
-  fig, ax = plt.subplots(figsize=(10, 7))
-  ax.set_title(title, fontsize=13, pad=18)
-  ax.axis("off")
-  if graph.number_of_nodes() == 0:
-    ax.text(0.5, 0.5, "No supported graph edges available", ha="center", va="center")
+  """Render graphs with separated nodes and a numbered edge key outside the plot."""
+  has_edges = graph.number_of_edges() > 0
+  has_key = bool(edge_labels) and has_edges
+  fig = plt.figure(figsize=(17, 10) if has_key else (15, 9))
+  if has_key:
+    ax = fig.add_axes([0.025, 0.07, 0.64, 0.84])
+    key_ax = fig.add_axes([0.69, 0.07, 0.29, 0.84])
+    key_ax.axis("off")
   else:
-    pos = nx.spring_layout(graph, seed=19, k=1.25)
-    nx.draw_networkx_nodes(graph, pos, ax=ax, node_size=1700, alpha=0.9)
-    nx.draw_networkx_labels(graph, pos, ax=ax, font_size=8)
-    widths = []
-    for _, _, data in graph.edges(data=True):
-      widths.append(1.0 + min(float(data.get("weight", 1)), 8) * 0.35)
-    edge_kwargs = {"width": widths, "alpha": 0.65}
-    if directed:
-      edge_kwargs.update({"arrows": True, "arrowsize": 16, "connectionstyle": "arc3,rad=0.06"})
-    nx.draw_networkx_edges(graph, pos, ax=ax, **edge_kwargs)
-    if edge_labels:
-      nx.draw_networkx_edge_labels(graph, pos, edge_labels=edge_labels, ax=ax, font_size=7)
-  fig.tight_layout()
-  fig.savefig(output_path, dpi=180, bbox_inches="tight")
-  plt.close(fig)
+    ax = fig.add_axes([0.035, 0.07, 0.93, 0.84])
+    key_ax = None
 
+  fig.suptitle(title, fontsize=16, y=0.97)
+  ax.axis("off")
+  if graph.number_of_nodes() == 0 or not has_edges:
+    ax.text(0.5, 0.5, "No supported graph edges available", ha="center", va="center",
+            transform=ax.transAxes, fontsize=13)
+    if key_ax is not None:
+      key_ax.text(0, 1, "Edge key", va="top", fontsize=12, fontweight="bold")
+      key_ax.text(0, 0.94, "No supported evidence edges in this graph.", va="top", wrap=True)
+  else:
+    # Kamada–Kawai spreads small character networks more consistently than the
+    # default spring layout. Scale and generous axes reduce node/label crowding.
+    try:
+      pos = nx.kamada_kawai_layout(graph, scale=2.0)
+    except Exception:
+      pos = nx.spring_layout(graph, seed=19, k=2.2, iterations=400, scale=2.0)
+    nx.draw_networkx_nodes(graph, pos, ax=ax, node_size=2200, alpha=0.92)
+    nx.draw_networkx_labels(graph, pos, ax=ax, font_size=9)
+    widths = [1.0 + min(float(data.get("weight", 1)), 8) * 0.28
+              for _, _, data in graph.edges(data=True)]
+    edge_kwargs = {"width": widths, "alpha": 0.62, "edge_color": "#555555"}
+    if directed:
+      edge_kwargs.update({"arrows": True, "arrowsize": 18, "connectionstyle": "arc3,rad=0.10"})
+    nx.draw_networkx_edges(graph, pos, ax=ax, **edge_kwargs)
+
+    if has_key:
+      # Edge numbers are deliberately separated from long relation names.
+      edge_list = list(graph.edges())
+      key_entries = []
+      for number, (a, b) in enumerate(edge_list, start=1):
+        midpoint = ((pos[a][0] + pos[b][0]) / 2, (pos[a][1] + pos[b][1]) / 2)
+        ax.text(midpoint[0], midpoint[1], str(number), fontsize=8, fontweight="bold",
+                ha="center", va="center",
+                bbox={"boxstyle": "circle,pad=0.22", "fc": "white", "ec": "0.35", "alpha": 0.96})
+        label = edge_labels.get((a, b), edge_labels.get((b, a), "Evidence edge"))
+        key_entries.append(f"{number}. {a} — {b}: {str(label).replace(chr(10), ' / ')}")
+
+      key_ax.text(0, 1, "Edge key", va="top", fontsize=12, fontweight="bold")
+      # Use two columns for dense interaction graphs; one column for smaller
+      # relationship graphs. This prevents the key itself from clipping.
+      columns = 2 if len(key_entries) > 12 else 1
+      chunks = [key_entries[i::columns] for i in range(columns)]
+      for col_index, entries in enumerate(chunks):
+        x = col_index * (0.50 if columns == 2 else 0.0)
+        y = 0.93
+        for entry in entries:
+          wrapped = textwrap.wrap(entry, width=34 if columns == 2 else 46) or [entry]
+          key_ax.text(x, y, "\n".join(wrapped), va="top", fontsize=7.6 if columns == 2 else 8.3)
+          y -= 0.045 * len(wrapped) + 0.012
+      if min(y for y in [0.93 - sum(0.045 * len(textwrap.wrap(e, width=34 if columns == 2 else 46) or [e]) + 0.012 for e in chunk) for chunk in chunks]) < 0:
+        key_ax.text(0, -0.015, "Full evidence is available in the Excel report.",
+                    va="top", fontsize=8, wrap=True)
+  fig.savefig(output_path, dpi=220, bbox_inches="tight", facecolor="white")
+  plt.close(fig)
 
 def export_play_graphs(output_path, graph_dir, semantic_rows):
   """Export separate interaction and semantic-evidence graphs for both plays."""
@@ -407,8 +481,13 @@ def export_play_graphs(output_path, graph_dir, semantic_rows):
         a, b, weight = clean(row[1]), clean(row[2]), int(row[3] or 0)
         ig.add_edge(a, b, weight=weight)
     interaction_path = graph_dir / (("tara" if play == "Tara" else "dance_like_a_man") + "_interaction_graph.png")
+    interaction_labels = {
+      (clean(row[1]), clean(row[2])): f"Adjacent transitions (n={int(row[3] or 0)})"
+      for row in interaction_edges if row[0] == play
+    }
     _draw_network(ig, interaction_path,
-                  f"{play} — adjacent speaker-turn interaction\n(Not a semantic relationship graph)")
+                  f"{play} — adjacent speaker-turn interaction\n(Not a semantic relationship graph)",
+                  edge_labels=interaction_labels)
     index_rows.append([play, "Interaction graph", str(interaction_path.relative_to(output_path.parent)),
                        ig.number_of_nodes(), ig.number_of_edges(),
                        "Edges count consecutive annotated speaker turns within the same Act."])
@@ -419,7 +498,7 @@ def export_play_graphs(output_path, graph_dir, semantic_rows):
     relation_labels = {}
     relevant = [r for r in semantic_rows if r[0] == play]
     if play == "Tara":
-      relevant = [r for r in relevant if r[4] == "TARA_UTTERANCE_ANNOTATION"]
+      relevant = [r for r in relevant if r[4] == "TARA_ANNOTATION_EVIDENCE"]
     else:
       relevant = [r for r in relevant if r[4] == "CORPUS_DOCUMENTED_NOTE"]
     for row in relevant:
@@ -431,7 +510,7 @@ def export_play_graphs(output_path, graph_dir, semantic_rows):
       else:
         relation_labels[(a, b)] = label
     rel_path = graph_dir / (("tara" if play == "Tara" else "dance_like_a_man") + "_relationship_evidence_graph.png")
-    subtitle = ("Existing utterance annotations; not independently verified" if play == "Tara"
+    subtitle = ("Existing utterance annotation evidence; conflicting labels may coexist; not independently verified" if play == "Tara"
                 else "Explicit CHARACTER_MASTER notes; not a complete graph")
     _draw_network(sg, rel_path, f"{play} — relationship evidence\n({subtitle})",
                   edge_labels=relation_labels, directed=(play != "Tara"))
