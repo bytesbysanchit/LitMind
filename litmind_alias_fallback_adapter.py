@@ -17,10 +17,8 @@ from spacy.matcher import PhraseMatcher
 STAGE_CUES = re.compile(r"\b(turns? to|slowly comes|walks?|enters?|exits?|sits?|stands?|lies down|looks? at|moves? to|crosses?|dances?|pause|silence|blackout|lights? fade|stage direction)\b", re.I)
 META_CUES = re.compile(r"\b(title|copyright|written by|author|novel|manuscript|book|playwright|publisher|published|address)\b", re.I)
 
-
 def txt(v):
     return "" if pd.isna(v) else str(v).strip()
-
 
 def classify_candidate(text: str, start: int, end: int, has_multiple_chars: bool):
     """Conservative heuristic flags; all matches still require review."""
