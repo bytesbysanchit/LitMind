@@ -1,0 +1,90 @@
+LITMIND DRACULA GOLD-PAIR DIAGNOSTICS
+Raw Dracula annotation rows: 20
+Distinct unordered gold pairs: 15
+
+PREDICTION -> BEST GOLD-PAIR CANDIDATES (name similarity only; suggestions are not automatic matches)
+
+Prediction: Abraham Van Helsing -- Quincey Morris | LitMind label=OTHER / UNKNOWN
+  similarity=0.700 | gold pair=Mina Murray -- Van Helsing | annotations=[('social / acquaintance', 1)]
+  similarity=0.645 | gold pair=Van Helsing -- Lucy Westenra | annotations=[('professional / person offering service to client', 1)]
+  similarity=0.636 | gold pair=Arthur Holmwood -- Quincey Morris | annotations=[('social / friend', 1)]
+  similarity=0.580 | gold pair=Van Helsing -- John Seward | annotations=[('professional / teacher', 2)]
+  similarity=0.571 | gold pair=Van Helsing -- Count Dracula | annotations=[('social / enemy', 1)]
+
+Prediction: Arthur Holmwood -- Lucy Westenra | LitMind label=CONFLICT / ENEMY
+  similarity=0.920 | gold pair=Lucy Westenra -- Arthur Holmwood | annotations=[('social / unrequited love interest', 1), ('social / lovers', 1)]
+  similarity=0.645 | gold pair=Arthur Holmwood -- Quincey Morris | annotations=[('social / friend', 1)]
+  similarity=0.614 | gold pair=Van Helsing -- Lucy Westenra | annotations=[('professional / person offering service to client', 1)]
+  similarity=0.585 | gold pair=Arthur Holmwood -- John Seward | annotations=[('social / friend', 1)]
+  similarity=0.575 | gold pair=Mina Murray -- Lucy Westenra | annotations=[('social / friend', 2)]
+
+Prediction: Arthur Holmwood -- Quincey Morris | LitMind label=OTHER / UNKNOWN
+  similarity=0.920 | gold pair=Arthur Holmwood -- Quincey Morris | annotations=[('social / friend', 1)]
+  similarity=0.645 | gold pair=Lucy Westenra -- Arthur Holmwood | annotations=[('social / unrequited love interest', 1), ('social / lovers', 1)]
+  similarity=0.580 | gold pair=Arthur Holmwood -- John Seward | annotations=[('social / friend', 1)]
+  similarity=0.567 | gold pair=Quincey Morris -- Count Dracula | annotations=[('social / enemy', 1)]
+  similarity=0.394 | gold pair=Mina Murray -- Van Helsing | annotations=[('social / acquaintance', 1)]
+
+Prediction: Count Dracula -- Jonathan Harker | LitMind label=FRIEND / COMPANION
+  similarity=0.920 | gold pair=Count Dracula -- Jonathan Harker | annotations=[('professional / person offering service to client', 1), ('social / rivals', 1)]
+  similarity=0.652 | gold pair=Van Helsing -- Count Dracula | annotations=[('social / enemy', 1)]
+  similarity=0.585 | gold pair=Jonathan Harker -- Mina Murray | annotations=[('familial / husband/wife', 1), ('social / lovers', 1)]
+  similarity=0.575 | gold pair=Mina Murray -- Count Dracula | annotations=[('social / rivals', 1)]
+  similarity=0.563 | gold pair=Quincey Morris -- Count Dracula | annotations=[('social / enemy', 1)]
+
+Prediction: John Seward -- Lucy Westenra | LitMind label=FRIEND / COMPANION
+  similarity=0.627 | gold pair=Lucy Westenra -- Count Dracula | annotations=[('social / rivals', 1)]
+  similarity=0.596 | gold pair=Van Helsing -- Lucy Westenra | annotations=[('professional / person offering service to client', 1)]
+  similarity=0.596 | gold pair=Mina Murray -- Lucy Westenra | annotations=[('social / friend', 2)]
+  similarity=0.585 | gold pair=Van Helsing -- John Seward | annotations=[('professional / teacher', 2)]
+  similarity=0.575 | gold pair=Lucy Westenra -- Arthur Holmwood | annotations=[('social / unrequited love interest', 1), ('social / lovers', 1)]
+
+Prediction: John Seward -- Quincey Morris | LitMind label=FRIEND / COMPANION
+  similarity=0.627 | gold pair=Quincey Morris -- Count Dracula | annotations=[('social / enemy', 1)]
+  similarity=0.598 | gold pair=Arthur Holmwood -- John Seward | annotations=[('social / friend', 1)]
+  similarity=0.575 | gold pair=Arthur Holmwood -- Quincey Morris | annotations=[('social / friend', 1)]
+  similarity=0.551 | gold pair=Renfield -- John Seward | annotations=[('professional / client', 1)]
+  similarity=0.540 | gold pair=Van Helsing -- John Seward | annotations=[('professional / teacher', 2)]
+
+Prediction: Jonathan Harker -- Lucy Westenra | LitMind label=ROMANTIC / LOVE
+  similarity=0.652 | gold pair=Van Helsing -- Lucy Westenra | annotations=[('professional / person offering service to client', 1)]
+  similarity=0.627 | gold pair=Lucy Westenra -- Arthur Holmwood | annotations=[('social / unrequited love interest', 1), ('social / lovers', 1)]
+  similarity=0.614 | gold pair=Count Dracula -- Jonathan Harker | annotations=[('professional / person offering service to client', 1), ('social / rivals', 1)]
+  similarity=0.603 | gold pair=Lucy Westenra -- Count Dracula | annotations=[('social / rivals', 1)]
+  similarity=0.585 | gold pair=Jonathan Harker -- Mina Murray | annotations=[('familial / husband/wife', 1), ('social / lovers', 1)]
+
+Prediction: Jonathan Harker -- Peter Hawkins | LitMind label=PROFESSIONAL
+  No plausible name-similarity candidate. Check benchmark spelling/character identity manually.
+
+Prediction: Jonathan Harker -- Quincey Morris | LitMind label=FRIEND / COMPANION
+  similarity=0.700 | gold pair=Jonathan Harker -- Mina Murray | annotations=[('familial / husband/wife', 1), ('social / lovers', 1)]
+  similarity=0.627 | gold pair=Arthur Holmwood -- Quincey Morris | annotations=[('social / friend', 1)]
+  similarity=0.603 | gold pair=Quincey Morris -- Count Dracula | annotations=[('social / enemy', 1)]
+  similarity=0.571 | gold pair=Count Dracula -- Jonathan Harker | annotations=[('professional / person offering service to client', 1), ('social / rivals', 1)]
+  similarity=0.432 | gold pair=Mina Murray -- Van Helsing | annotations=[('social / acquaintance', 1)]
+
+Prediction: Lucy Westenra -- Quincey Morris | LitMind label=FRIEND / COMPANION
+  similarity=0.700 | gold pair=Mina Murray -- Lucy Westenra | annotations=[('social / friend', 2)]
+  similarity=0.614 | gold pair=Quincey Morris -- Count Dracula | annotations=[('social / enemy', 1)]
+  similarity=0.598 | gold pair=Lucy Westenra -- Arthur Holmwood | annotations=[('social / unrequited love interest', 1), ('social / lovers', 1)]
+  similarity=0.571 | gold pair=Lucy Westenra -- Count Dracula | annotations=[('social / rivals', 1)]
+  similarity=0.545 | gold pair=Mrs. Westenra -- Lucy Westenra | annotations=[('familial / parent', 1)]
+
+ALL DISTINCT GOLD PAIRS FOR DRACULA
+  Arthur Holmwood -- John Seward | votes=[('social / friend', 1)]
+  Arthur Holmwood -- Quincey Morris | votes=[('social / friend', 1)]
+  Count Dracula -- Jonathan Harker | votes=[('professional / person offering service to client', 1), ('social / rivals', 1)]
+  Jonathan Harker -- Mina Murray | votes=[('familial / husband/wife', 1), ('social / lovers', 1)]
+  Lucy Westenra -- Arthur Holmwood | votes=[('social / unrequited love interest', 1), ('social / lovers', 1)]
+  Lucy Westenra -- Count Dracula | votes=[('social / rivals', 1)]
+  Mina Murray -- Count Dracula | votes=[('social / rivals', 1)]
+  Mina Murray -- Lucy Westenra | votes=[('social / friend', 2)]
+  Mina Murray -- Van Helsing | votes=[('social / acquaintance', 1)]
+  Mrs. Westenra -- Lucy Westenra | votes=[('familial / parent', 1)]
+  Quincey Morris -- Count Dracula | votes=[('social / enemy', 1)]
+  Renfield -- John Seward | votes=[('professional / client', 1)]
+  Van Helsing -- Count Dracula | votes=[('social / enemy', 1)]
+  Van Helsing -- John Seward | votes=[('professional / teacher', 2)]
+  Van Helsing -- Lucy Westenra | votes=[('professional / person offering service to client', 1)]
+
+CAUTION: similarity suggestions are for human inspection only. Do not auto-merge characters or compute final metrics from fuzzy matches.

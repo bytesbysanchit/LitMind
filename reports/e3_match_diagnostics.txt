@@ -1,0 +1,24 @@
+LITMIND E3 MATCH DIAGNOSTICS
+Gold annotation rows: 2170
+Distinct gold titles: 109
+Prediction rows: 10
+Prediction titles and exact normalized title availability:
+  'Dracula': predictions=10; gold title match=YES: Dracula
+
+Gold title candidates containing each prediction title:
+  'Dracula': ['Dracula']
+
+Prediction pairs:
+  title='Dracula' | 'Abraham Van Helsing' -- 'Quincey Morris' | label='OTHER / UNKNOWN'
+  title='Dracula' | 'Arthur Holmwood' -- 'Lucy Westenra' | label='CONFLICT / ENEMY'
+  title='Dracula' | 'Arthur Holmwood' -- 'Quincey Morris' | label='OTHER / UNKNOWN'
+  title='Dracula' | 'Count Dracula' -- 'Jonathan Harker' | label='FRIEND / COMPANION'
+  title='Dracula' | 'John Seward' -- 'Lucy Westenra' | label='FRIEND / COMPANION'
+  title='Dracula' | 'John Seward' -- 'Quincey Morris' | label='FRIEND / COMPANION'
+  title='Dracula' | 'Jonathan Harker' -- 'Lucy Westenra' | label='ROMANTIC / LOVE'
+  title='Dracula' | 'Jonathan Harker' -- 'Peter Hawkins' | label='PROFESSIONAL'
+  title='Dracula' | 'Jonathan Harker' -- 'Quincey Morris' | label='FRIEND / COMPANION'
+  title='Dracula' | 'Lucy Westenra' -- 'Quincey Morris' | label='FRIEND / COMPANION'
+
+Suggested next step:
+At least one title matches. Inspect canonical character names/aliases for pairs that fail to match. Keep title and pair matching exact unless an explicit documented alias map is added.
