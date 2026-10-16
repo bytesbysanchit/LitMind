@@ -61,6 +61,34 @@ def analyze_novel(text_path: str | Path) -> dict[str, Any]:
         })
 
     characters = sorted(str(name) for name in ns.get("valid_characters", set()))
+
+    # Expose the existing frozen analyzer's PERSON-entity counts to the UI.
+    # Canonical aliases are merged only when the analyzer's own lookup maps them
+    # to a selected valid character; we do not modify the NLP source file.
+    raw_counts = ns.get("character", {})
+    canonical_lookup = ns.get("canonical_lookup", {})
+    valid_set = set(characters)
+    mention_counts: dict[str, int] = {}
+    for raw_name, raw_count in raw_counts.items():
+        raw_name = str(raw_name)
+        canonical = str(canonical_lookup.get(raw_name, raw_name))
+        if canonical in valid_set:
+            mention_counts[canonical] = mention_counts.get(canonical, 0) + int(raw_count)
+    # If canonical mapping yields no selected-name matches, still show the actual
+    # detected PERSON names instead of a misleading zero-count empty table.
+    if not mention_counts:
+        mention_counts = {str(name): int(count) for name, count in raw_counts.items()}
+
+    raw_contexts = ns.get("character_context", {})
+    character_context: dict[str, list[str]] = {}
+    for raw_name, examples in raw_contexts.items():
+        canonical = str(canonical_lookup.get(str(raw_name), str(raw_name)))
+        target = canonical if canonical in valid_set else str(raw_name)
+        character_context.setdefault(target, [])
+        for example in examples if isinstance(examples, (list, tuple)) else [examples]:
+            if example and len(character_context[target]) < 3 and str(example) not in character_context[target]:
+                character_context[target].append(str(example))
+
     graph_edges = []
     if graph is not None:
         graph_edges = [
@@ -76,6 +104,9 @@ def analyze_novel(text_path: str | Path) -> dict[str, Any]:
         "token_count": len(ns["doc"]) if ns.get("doc") is not None else 0,
         "characters": characters,
         "character_count": len(characters),
+        "character_mention_counts": mention_counts,
+        "character_context": character_context,
+        "total_person_mentions": sum(mention_counts.values()),
         "interaction_graph_edges": graph_edges,
         "relationship_results": relationships,
         "console_output": output.getvalue(),
