@@ -19,8 +19,8 @@ LitMind is an AI-powered Novel Analyzer that uses Natural Language Processing (N
 * NLTK
 * NetworkX
 * Plotly
-* Streamlit
 * Google Gemini API
+* Streamlit
 
 ## 📌 Project Status
 
