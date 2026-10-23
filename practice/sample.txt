@@ -1,3 +1,0 @@
-Welcome to LitMind.
-This is my first NLP project.
-AI Powered Novel Analyzer
