@@ -71,7 +71,7 @@ if text:
 else:
     st.info("Pick a sample or upload a book to begin.")
 
-tab_c, tab_s, tab_t = st.tabs(["Characters & relationships", "Summary & genre", "Taste match"])
+tab_c, tab_s, tab_t, tab_e = st.tabs(["Characters & relationships", "Summary & genre", "Taste match", "Evaluation"])
 
 # ------------------------------------------------------------------ tab 1
 with tab_c:
@@ -208,3 +208,249 @@ with tab_t:
                 st.write("**Lowers it:**", ", ".join(f"{n} ({v:+.3f})" for n, v in out["reasons"]["lowers_match"]) or "–")
             if st.button("Recommend 20 books from the catalogue"):
                 st.dataframe(model.recommend(catalog, history, 20), width="stretch", hide_index=True)
+
+
+# ------------------------------------------------------------------ tab 4: evaluation
+# Isolated from the production analysis and Taste Match pipeline.
+with tab_e:
+    import re
+
+    st.subheader("Sample evaluation")
+    st.caption(
+        "Evaluation is limited to a documented sample passage. "
+        "It is not a full-novel accuracy score."
+    )
+
+    BENCHMARKS = {
+        "Sherlock Holmes (Adventures)": {
+            "marker": '"Wedlock suits you',
+            "length": 3000,
+            "gold_characters": ["Sherlock Holmes", "John Watson"],
+            "aliases": {
+                "Sherlock Holmes": {"sherlock holmes", "holmes"},
+                "John Watson": {"john watson", "watson", "dr watson"},
+            },
+            "gold_pairs": [("Sherlock Holmes", "John Watson")],
+        },
+        "Dracula": {
+            "marker": "I am Dracula;",
+            "length": 3000,
+            "gold_characters": [
+                "Jonathan Harker", "Count Dracula", "Mr Hawkins"
+            ],
+            "aliases": {
+                "Jonathan Harker": {"jonathan harker", "harker"},
+                "Count Dracula": {"count dracula", "dracula", "the count"},
+                "Mr Hawkins": {"mr hawkins", "hawkins"},
+            },
+            "gold_pairs": [("Jonathan Harker", "Count Dracula")],
+        },
+    }
+
+    def eval_norm(value):
+        value = str(value).casefold().replace("’", "'").strip()
+        value = re.sub(
+            r"^(mr|mrs|miss|ms|dr|sir|lady|lord|professor|captain|count)\.?\s+",
+            "", value
+        )
+        return " ".join(re.sub(r"[^a-z0-9 ]+", " ", value).split())
+
+    def eval_prf(tp, fp, fn):
+        p = tp / (tp + fp) if tp + fp else 0.0
+        r = tp / (tp + fn) if tp + fn else 0.0
+        f = 2 * p * r / (p + r) if p + r else 0.0
+        return p, r, f
+
+    if sample not in BENCHMARKS:
+        st.info("Select Sherlock Holmes or Dracula above.")
+    elif st.button("Run Evaluation", type="primary", key="builtin_run_eval"):
+        try:
+            benchmark = BENCHMARKS[sample]
+            source = read_file(SAMPLES[sample])
+            offset = source.find(benchmark["marker"])
+
+            # Try a quote-insensitive fallback for text-file punctuation.
+            if offset < 0:
+                marker_plain = benchmark["marker"].strip('"“”‘’').casefold()
+                offset = source.casefold().find(marker_plain)
+
+            if offset < 0:
+                st.error(
+                    "Benchmark passage not found in the sample file. "
+                    "Check the marker against data/samples."
+                )
+            else:
+                passage = source[offset:offset + benchmark["length"]]
+
+                st.write(f"Sample: **{sample}**")
+                st.write(f"Passage length: **{len(passage):,} characters**")
+
+                with st.spinner("Running the existing character detector…"):
+                    result = chars_mod.extract_characters(
+                        passage, get_nlp(spacy_model), min_mentions=1
+                    )
+                    predicted_rels = compute_relations(
+                        result, window=3, min_together=1, top_n=100
+                    )
+
+                # Show the detector's raw output first. Empty output must
+                # not be mistaken for a valid zero-accuracy conclusion.
+                st.markdown("### Raw detector output")
+                pred_chars = list(result.characters)
+                st.write(f"Detected character candidates: **{len(pred_chars)}**")
+
+                if pred_chars:
+                    st.dataframe(pd.DataFrame([
+                        {
+                            "Detected character": c.name,
+                            "Aliases": ", ".join(c.alias_list),
+                            "Mentions": c.mentions,
+                        }
+                        for c in pred_chars
+                    ]), width="stretch", hide_index=True)
+                else:
+                    st.warning(
+                        "The existing detector returned no characters for "
+                        "this passage. The scores below will be zero, but "
+                        "that alone does not establish full-model accuracy."
+                    )
+
+                gold = benchmark["gold_characters"]
+                aliases = benchmark["aliases"]
+                matched_by_pred = {}
+                pred_rows = []
+
+                for c in pred_chars:
+                    variants = {
+                        eval_norm(c.name),
+                        *(eval_norm(a) for a in c.alias_list),
+                    }
+                    hit = next(
+                        (
+                            g for g in gold
+                            if variants & {
+                                eval_norm(a)
+                                for a in aliases.get(g, {g})
+                            }
+                        ),
+                        None,
+                    )
+                    if hit and hit not in matched_by_pred.values():
+                        matched_by_pred[c.name] = hit
+                    else:
+                        hit = None
+
+                    pred_rows.append({
+                        "LitMind prediction": c.name,
+                        "Aliases": ", ".join(c.alias_list),
+                        "Mentions": c.mentions,
+                        "Ground-truth match": hit or "—",
+                        "Status": "MATCH" if hit else "UNMATCHED / REVIEW",
+                    })
+
+                matched_gold = set(matched_by_pred.values())
+                tp = len(matched_gold)
+                fp = len(pred_chars) - len(matched_by_pred)
+                fn = len(set(gold) - matched_gold)
+                p, r, f = eval_prf(tp, fp, fn)
+
+                st.markdown("### Character evaluation")
+                if pred_rows:
+                    st.dataframe(
+                        pd.DataFrame(pred_rows),
+                        width="stretch",
+                        hide_index=True,
+                    )
+                st.write("**Ground-truth characters:** " + ", ".join(gold))
+
+                a, b, c, d = st.columns(4)
+                a.metric("Matched (TP)", tp)
+                b.metric("False positives (FP)", fp)
+                c.metric("Missed (FN)", fn)
+                d.metric("Precision / Recall / F1",
+                         f"{p:.1%} / {r:.1%} / {f:.1%}")
+
+                gold_pairs = {
+                    tuple(sorted((eval_norm(a), eval_norm(b))))
+                    for a, b in benchmark["gold_pairs"]
+                }
+                predicted_pairs = set()
+                pair_rows = []
+
+                for rel in predicted_rels:
+                    a_name = matched_by_pred.get(rel.a, rel.a)
+                    b_name = matched_by_pred.get(rel.b, rel.b)
+                    pair = tuple(sorted((
+                        eval_norm(a_name), eval_norm(b_name)
+                    )))
+                    if pair[0] == pair[1]:
+                        continue
+
+                    predicted_pairs.add(pair)
+                    pair_rows.append({
+                        "LitMind pair": f"{rel.a} — {rel.b}",
+                        "Together windows": rel.together,
+                        "Strength": rel.strength,
+                        "Ground-truth match":
+                            "MATCH" if pair in gold_pairs else "—",
+                        "Status":
+                            "MATCH" if pair in gold_pairs
+                            else "UNMATCHED / REVIEW",
+                        "Evidence": " | ".join(rel.evidence),
+                    })
+
+                tp_pair = len(predicted_pairs & gold_pairs)
+                fp_pair = len(predicted_pairs - gold_pairs)
+                fn_pair = len(gold_pairs - predicted_pairs)
+                pp, pr, pf = eval_prf(tp_pair, fp_pair, fn_pair)
+
+                st.markdown("### Interaction-pair evaluation")
+                st.caption(
+                    "Pairs measure co-occurrence/interaction, not semantic "
+                    "labels such as friend, enemy, or family."
+                )
+                if pair_rows:
+                    st.dataframe(
+                        pd.DataFrame(pair_rows),
+                        width="stretch",
+                        hide_index=True,
+                    )
+                else:
+                    st.info("No interaction pairs were produced by the detector.")
+
+                st.write(
+                    "**Ground-truth pairs:** "
+                    + "; ".join(
+                        f"{a} — {b}"
+                        for a, b in benchmark["gold_pairs"]
+                    )
+                )
+                a, b, c, d = st.columns(4)
+                a.metric("Matched (TP)", tp_pair)
+                b.metric("False positives (FP)", fp_pair)
+                c.metric("Missed (FN)", fn_pair)
+                d.metric("Precision / Recall / F1",
+                         f"{pp:.1%} / {pr:.1%} / {pf:.1%}")
+
+                report = pd.DataFrame([
+                    {
+                        "Task": "Characters (fixed passage)",
+                        "TP": tp, "FP": fp, "FN": fn,
+                        "Precision": p, "Recall": r, "F1": f,
+                    },
+                    {
+                        "Task": "Interaction pairs (fixed passage)",
+                        "TP": tp_pair, "FP": fp_pair, "FN": fn_pair,
+                        "Precision": pp, "Recall": pr, "F1": pf,
+                    },
+                ])
+                st.download_button(
+                    "Download evaluation report CSV",
+                    report.to_csv(index=False).encode("utf-8-sig"),
+                    file_name=f"{Path(sample).stem}_evaluation.csv",
+                    mime="text/csv",
+                )
+
+        except Exception as exc:
+            st.error(f"Evaluation failed: {exc}")
+            st.exception(exc)
