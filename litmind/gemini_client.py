@@ -26,6 +26,8 @@ from typing import Callable, Protocol
 
 from pydantic import BaseModel, Field
 
+from .render import clean_summary, format_genres
+
 DEFAULT_MODELS = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"]
 SINGLE_CALL_CHARS = int(os.getenv("GEMINI_SINGLE_CALL_CHARS", "350000"))
 CHUNK_CHARS = int(os.getenv("GEMINI_CHUNK_CHARS", "60000"))
@@ -46,12 +48,49 @@ class GeminiError(RuntimeError):
 # --------------------------------------------------------------------------- #
 class BookAnalysis(BaseModel):
     one_line_pitch: str = Field(description="One sentence that sells the book.")
-    summary: str = Field(description="Plot summary, 200-300 words, plain prose.")
+    overview: str = Field(default="", description="Concise overview, 50-80 words, plain prose.")
+    summary: str = Field(description="Detailed plot summary, 200-300 words, plain prose, no JSON.")
     primary_genre: str
     sub_genres: list[str] = Field(default_factory=list)
+    genre_rationale: str = Field(default="", description="1-2 sentences, grounded in the text, why this genre.")
     themes: list[str] = Field(default_factory=list)
     setting: str = ""
     tone: str = ""
+
+
+class ProtagonistAnalysis(BaseModel):
+    determinable: bool = Field(default=True, description="False if the text does not show a clear protagonist.")
+    name: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    narrative_role: str = ""
+    personality_traits: list[str] = Field(default_factory=list)
+    motivations: str = ""
+    major_conflicts: str = ""
+    character_arc: str = ""
+    key_relationships: list[str] = Field(default_factory=list)
+    multiple_protagonists: bool = False
+    other_protagonists: list[str] = Field(default_factory=list)
+
+
+class ProposedCharacter(BaseModel):
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+    description: str = ""
+
+
+class ProposedRelation(BaseModel):
+    a: str
+    b: str
+    type: str = ""
+    evidence: str = ""
+
+
+class ReferenceProposal(BaseModel):
+    """Reference annotations proposed by Gemini from raw text. UNVERIFIED until the user confirms."""
+    characters: list[ProposedCharacter] = Field(default_factory=list)
+    relationships: list[ProposedRelation] = Field(default_factory=list)
+    protagonist: ProtagonistAnalysis = Field(default_factory=ProtagonistAnalysis)
+    genres: list[str] = Field(default_factory=list)
 
 
 class ChunkNotes(BaseModel):
@@ -136,7 +175,12 @@ def _load_dotenv() -> None:
 
 def get_api_key() -> str | None:
     _load_dotenv()
-    return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    return os.getenv("GEMINI_API_KEY")
+
+
+def gemini_configured() -> bool:
+    """True if a key exists on the server. Never returns or logs the key itself."""
+    return bool(get_api_key())
 
 
 # --------------------------------------------------------------------------- #
@@ -152,6 +196,7 @@ class GeminiClient:
     def __init__(self, api_key: str | None = None, model: str | None = None,
                  backend: Backend | None = None, max_retries: int = 2,
                  sleep: Callable[[float], None] = time.sleep):
+        self._secrets: list[str] = [api_key] if api_key else []
         self.models = [model] if model else []
         env_model = os.getenv("GEMINI_MODEL")
         for m in ([env_model] if env_model else []) + DEFAULT_MODELS:
@@ -160,13 +205,22 @@ class GeminiClient:
         if backend is None:
             key = api_key or get_api_key()
             if not key:
-                raise GeminiError("No Gemini API key found. Add GEMINI_API_KEY to your .env file.")
+                raise GeminiError("Gemini is not configured on this server. "
+                                  "Set GEMINI_API_KEY in the server environment and restart.")
+            self._secrets.append(key)
             backend = _GenAIBackend(key)
         self.backend = backend
         self.max_retries = max_retries
         self._sleep = sleep
         self.calls = 0
         self.active_model = self.models[0]
+
+    def _scrub(self, text: str) -> str:
+        """Remove the API key (and key=... query fragments) from anything shown to a user or logged."""
+        for secret in self._secrets:
+            if secret:
+                text = text.replace(secret, "[hidden]")
+        return re.sub(r"(?i)(api[_-]?key|key)=([^&\s'\"]+)", r"\1=[hidden]", text)
 
     # ----------------------------------------------------------------- core
     def _call(self, prompt: str, schema: type[BaseModel]) -> BaseModel:
@@ -182,7 +236,8 @@ class GeminiClient:
                     last = exc
                     kind = _classify(exc)
                     if kind == "auth":
-                        raise GeminiError("Gemini rejected the API key (invalid or lacks access).") from exc
+                        raise GeminiError("Gemini rejected the server's API key (invalid or no access). "
+                                          "Ask the administrator to check it.") from None
                     if kind == "model":
                         break                                   # try the next model name
                     if kind == "retry":
@@ -192,13 +247,13 @@ class GeminiClient:
                         break                                   # still overloaded: try the next model
                     if kind == "bad_output" and attempt < 1:
                         continue                                # one more try for malformed JSON
-                    raise GeminiError(f"Gemini request failed: {_short(exc)}") from exc
+                    raise GeminiError(f"Gemini request failed: {self._scrub(_short(exc))}") from None
         if _is_network(last):
             raise GeminiError(
-                "Could not keep a connection to Gemini (network dropped: " + _short(last) + "). "
-                "Check your internet, turn off any VPN/proxy/firewall, then try again. "
-                "Run `python3 scripts/check_gemini.py` to test the connection on its own.") from last
-        raise GeminiError(f"None of the models worked ({', '.join(self.models)}): {_short(last)}")
+                "Could not keep a connection to Gemini (network dropped: " + self._scrub(_short(last)) + "). "
+                "Check the internet connection and any VPN, proxy or firewall, then try again.") from None
+        raise GeminiError(f"None of the models worked ({', '.join(self.models)}): "
+                          f"{self._scrub(_short(last))}") from None
 
     # --------------------------------------------------- summary and genre
     def analyze_book(self, text: str, title: str = "", author: str = "",
@@ -207,9 +262,11 @@ class GeminiClient:
         start_calls = self.calls
         hint = f'Title: "{title}"' + (f" by {author}" if author else "") + "\n" if title else ""
         final_prompt = (
-            f"{hint}Analyse this book and return JSON with: one_line_pitch, summary (200-300 words, "
-            f"cover the whole story arc; you may name the ending), primary_genre (choose ONE of: "
-            f"{', '.join(GENRES)}), sub_genres (0-3), themes (3-6 short phrases), setting, tone.\n\n"
+            f"{hint}Analyse this book and return JSON with: one_line_pitch; overview (50-80 words); "
+            f"summary (200-300 words of plain prose in short paragraphs, covering the whole story arc, "
+            f"you may name the ending; the value must be text, never nested JSON); primary_genre (choose "
+            f"ONE of: {', '.join(GENRES)}); sub_genres (0-3); genre_rationale (1-2 sentences grounded in "
+            f"the text); themes (3-6 short phrases); setting; tone. Use only what the text supports.\n\n"
         )
         if len(text) <= SINGLE_CALL_CHARS:
             say("Reading the whole book in one request…")
@@ -231,7 +288,13 @@ class GeminiClient:
                 final_prompt + "You are given chronological notes for each part of the book, plus its opening.\n\n"
                 "OPENING:\n" + opening + "\n\nNOTES:\n" + "\n\n".join(notes), BookAnalysis)
             mode = "map-reduce"
-        analysis.primary_genre = normalise_genre(analysis.primary_genre)
+        analysis.summary = clean_summary(analysis.summary)
+        analysis.overview = clean_summary(analysis.overview)
+        main, secondary = format_genres(analysis.primary_genre, analysis.sub_genres)
+        analysis.primary_genre = normalise_genre(main) if main else "Other"
+        analysis.sub_genres = [g for g in secondary if g.casefold() != analysis.primary_genre.casefold()]
+        if not analysis.summary:
+            raise GeminiError("Gemini returned no usable summary. Please try again.")
         return BookReport(analysis, self.active_model, self.calls - start_calls, mode)
 
     # ------------------------------------------------ character review pass
@@ -253,6 +316,39 @@ class GeminiClient:
             "3. roles: for each remaining character, a role of at most 12 words.\n\n"
             "DETECTED NAMES:\n" + "\n".join(lines))
         return self._call(prompt, CharacterReview)
+
+    # ------------------------------------------------------------ protagonist
+    def identify_protagonist(self, characters: list[dict], summary: str = "",
+                             snippets: dict[str, list[str]] | None = None) -> ProtagonistAnalysis:
+        """characters: [{"name", "mentions", "role"}]. Chooses ONLY from the evidence supplied."""
+        lines = [f"- {c['name']} (mentions: {c.get('mentions', '?')}; role: {c.get('role') or 'unknown'})"
+                 for c in characters[:12]]
+        ev = []
+        for name, sn in (snippets or {}).items():
+            ev.append(f"{name}:\n" + "\n".join(f"  [{i + 1}] {s[:300]}" for i, s in enumerate(sn[:6])))
+        prompt = (
+            "Identify the protagonist of this book from the evidence below. Prefer one of the listed "
+            "detected characters, but use the name as the book gives it. If the evidence does not show a "
+            "clear protagonist set determinable=false and leave fields empty. Describe: narrative_role, "
+            "personality_traits, motivations, major_conflicts, character_arc, key_relationships. Do not "
+            "invent events. If the book has several protagonists set multiple_protagonists=true and list "
+            "the others.\n\nDETECTED CHARACTERS:\n" + "\n".join(lines) +
+            ("\n\nBOOK SUMMARY:\n" + summary[:3000] if summary else "") +
+            ("\n\nPASSAGES:\n" + "\n\n".join(ev) if ev else ""))
+        return self._call(prompt, ProtagonistAnalysis)
+
+    # ------------------------------------------- AI-proposed reference (UNVERIFIED)
+    def propose_reference(self, sampled_text: str, title: str = "") -> ReferenceProposal:
+        """Propose reference annotations from raw text. Deliberately receives NO LitMind predictions,
+        so the proposal cannot be copied from the thing being evaluated."""
+        prompt = (
+            f"{'Title: ' + title + chr(10) if title else ''}Read these sampled passages of a book and propose "
+            "annotations: characters (name, aliases, one-line description), relationships between "
+            "characters (a, b, type such as friendship / family / romance / rivalry / mentorship / "
+            "professional / conflict, one short evidence quote), the protagonist (same fields as above) and "
+            "genre labels. Only include what the passages support. The passages are a sample, so the list "
+            "may be incomplete.\n\nPASSAGES:\n" + sampled_text)
+        return self._call(prompt, ReferenceProposal)
 
     # ------------------------------------------- relationship explanations
     def explain_relations(self, relations: list, max_pairs: int = 12) -> list:

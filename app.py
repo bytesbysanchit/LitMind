@@ -13,6 +13,7 @@ from litmind.gemini_client import GeminiClient, GeminiError, get_api_key
 from litmind.relations import compute_relations
 from litmind.taste_model import FormatError, TasteModel, load_books
 from litmind.text_io import read_file, read_upload
+from litmind.ui_eval import render as render_corpus_evaluation
 
 ROOT = Path(__file__).resolve().parent
 SAMPLES = {"Dracula": ROOT / "data/samples/Dracula.txt",
@@ -20,7 +21,7 @@ SAMPLES = {"Dracula": ROOT / "data/samples/Dracula.txt",
 
 st.set_page_config(page_title="LitMind 2", page_icon="📚", layout="wide")
 st.title("📚 LitMind 2")
-st.caption("Characters & aliases · relationships · Gemini summary & genre · taste match")
+st.caption("Characters & aliases · relationships · summary & genre · corpus validation · taste match")
 
 
 # ------------------------------------------------------------------ caching
@@ -64,14 +65,14 @@ else:
     name, text = None, None
 if text:
     if ss.get("book_name") != name:
-        for k in ("chars", "rels", "report", "review"):
+        for k in ("chars", "rels", "report", "review", "corpus_validation"):
             ss.pop(k, None)
         ss["book_name"] = name
     st.caption(f"{name}: {len(text):,} characters")
 else:
     st.info("Pick a sample or upload a book to begin.")
 
-tab_c, tab_s, tab_t = st.tabs(["Characters & relationships", "Summary & genre", "Taste match"])
+tab_c, tab_s, tab_v, tab_t = st.tabs(["Characters & relationships", "Summary & genre", "Corpus validation", "Taste match"])
 
 # ------------------------------------------------------------------ tab 1
 with tab_c:
@@ -168,7 +169,18 @@ with tab_s:
             st.markdown("**Themes:** " + ", ".join(a.themes))
             st.markdown(f"**Setting:** {a.setting}  \n**Tone:** {a.tone}")
 
-# ------------------------------------------------------------------ tab 3
+
+# ------------------------------------------------------------------ tab 3: corpus accuracy evaluation
+with tab_v:
+    render_corpus_evaluation(
+        ss,
+        gemini_factory=lambda: gemini(key, model_name),
+        book_text=text,
+        book_name=name,
+    )
+
+
+# ------------------------------------------------------------------ tab 4
 with tab_t:
     if history_file is None:
         st.info("Upload your reading history in the sidebar (same columns as Books.csv). "
