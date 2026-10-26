@@ -51,3 +51,16 @@ def test_missing_key_message(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False); monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.setattr(g, "_load_dotenv", lambda: None)
     with pytest.raises(g.GeminiError, match="GEMINI_API_KEY"): g.GeminiClient()
+
+def test_persistent_503_falls_back_to_next_model():
+    c, b = client([Err(503)] * 3 + [ANALYSIS])          # 1 try + 2 retries on model 1, then model 2 works
+    rep = c.analyze_book("x")
+    assert rep.model == c.models[1] and rep.calls == 4
+
+def test_connection_reset_is_retried_not_fatal():
+    c, b = client([ConnectionResetError(54, "Connection reset by peer"), ANALYSIS])
+    assert c.analyze_book("x").calls == 2
+
+def test_persistent_network_failure_gives_helpful_message():
+    c, _ = client([ConnectionResetError(54, "Connection reset by peer")] * 40)
+    with pytest.raises(g.GeminiError, match="VPN"): c.analyze_book("x")
