@@ -173,9 +173,8 @@ with tab_s:
             st.markdown("**Themes:** " + ", ".join(a.themes))
             st.markdown(f"**Setting:** {a.setting}  \n**Tone:** {a.tone}")
 
-# ------------------------------------------------------------------
-# Tab 3: Corpus Validation
-# ------------------------------------------------------------------
+
+# ------------------------------------------------------------------ tab 3
 with tab_e:
     st.subheader("Corpus Validation")
     st.caption(
@@ -420,6 +419,7 @@ with tab_e:
                 "separate reported benchmark; the current comparison score "
                 "above is calculated from this run."
             )
+
 
 # ------------------------------------------------------------------ tab 4
 with tab_t:
