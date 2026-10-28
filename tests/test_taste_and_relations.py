@@ -41,8 +41,3 @@ def test_relations_rank_pairs_that_meet_more_than_chance():
     res = CharacterResult([mk("A", together), mk("B", together), mk("C", list(range(0, 300, 3)))], [], [f"s{i}" for i in range(300)], 1)
     rels = compute_relations(res)
     assert (rels[0].a, rels[0].b) == ("A", "B") and rels[0].strength == 1.0 and rels[0].evidence
-
-def test_full_catalogue_as_history_gives_clear_error():
-    hist, cat = synthetic()
-    with pytest.raises(ValueError, match="full catalogue"):
-        TasteModel().fit(cat, cat)

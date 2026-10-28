@@ -24,8 +24,7 @@ class Relation:
     b: str
     together: int                 # windows in which both appear
     strength: float               # 0..1 (cosine of the two presence vectors)
-    pmi: float = 0.0              # >0 means they meet more often than chance
-    rank_score: float = 0.0       # smoothed strength used only to order pairs (shrinks rarely-seen characters)
+    pmi: float                    # >0 means they meet more often than chance
     evidence: list[str] = field(default_factory=list)
     # Filled by Gemini (optional):
     relation_type: str = ""
@@ -37,15 +36,13 @@ def compute_relations(
     result: CharacterResult,
     *,
     window: int = 3,
-    min_together: int = 1,
-    top_n: int = 50,
+    min_together: int = 3,
+    top_n: int = 20,
     evidence_per_pair: int = 3,
     evidence_chars: int = 320,
 ) -> list[Relation]:
     """Score every pair of characters by how often they appear in the same
-    `window`-sentence block. Returns the strongest `top_n` candidate pairs (an empty list is a valid result). A larger default
-    reduces the recall ceiling during reference evaluation; it can also introduce weaker candidates,
-    so precision and recall must be measured separately."""
+    `window`-sentence block. Returns the strongest `top_n` pairs."""
     n_sent = len(result.sentences)
     if n_sent == 0 or len(result.characters) < 2:
         return []
@@ -60,14 +57,11 @@ def compute_relations(
             continue
         strength = len(both) / math.sqrt(len(A) * len(B))
         pmi = math.log((len(both) * n_blocks) / (len(A) * len(B)))
-        rank = len(both) / math.sqrt((len(A) + 6) * (len(B) + 6))
-        rels.append(Relation(ca.name, cb.name, len(both), round(strength, 4), round(pmi, 3), rank_score=round(rank, 4)))
+        rels.append(Relation(ca.name, cb.name, len(both), round(strength, 4), round(pmi, 3)))
 
-    # Keep only pairs that meet more often than chance would predict, and rank by strength weighted by how
-    # much evidence there is, so a pair seen together once cannot outrank a well-supported pair.
-    # There is no minimum count: every pair with at least one shared passage can be listed.
+    # Rank by strength, but ignore pairs that meet less often than chance would predict.
     rels = [r for r in rels if r.pmi > 0]
-    rels.sort(key=lambda r: (-r.rank_score, -r.together))
+    rels.sort(key=lambda r: (-r.strength, -r.together))
     rels = rels[:top_n]
 
     # Evidence: blocks where both appear, spread evenly across the book.

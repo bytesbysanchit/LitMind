@@ -77,11 +77,7 @@ def clean_books(df: pd.DataFrame) -> pd.DataFrame:
     df["_publisher"] = df["Publisher"].str.casefold().str.replace(r"[^a-z0-9 ]", "", regex=True).str.strip()
     df["_title"] = df["Book-Title"].str.replace(r"\(.*?\)", " ", regex=True)   # drop "(Large Print)" etc.
     df["_decade"] = (df["Year"] // 10 * 10).map(lambda y: "unk" if pd.isna(y) else f"d{int(y)}")
-    # Same book, different edition: ignore "(Bantam Classics)", "(Paperback)" and ": Or There and Back Again".
-    base = (df["Book-Title"].str.replace(r"\(.*$", "", regex=True).str.replace(r"\s*[:;].*$", "", regex=True)
-            .str.casefold().str.replace(r"[^a-z0-9]", "", regex=True))
-    surname = df["_author"].str.split().str[-1].fillna("")
-    df["_key"] = base + "|" + surname
+    df["_key"] = (df["Book-Title"].str.casefold().str.replace(r"[^a-z0-9]", "", regex=True) + "|" + df["_author"])
     return df.reset_index(drop=True)
 
 
@@ -114,22 +110,14 @@ class TasteModel:
 
     # ----------------------------------------------------------- training
     def fit(self, history: pd.DataFrame, catalog: pd.DataFrame, *, neg_ratio: int = 5,
-            seed: int = 42, alpha: float | None = None) -> "TasteModel":
-        """`alpha` fixes the ridge strength and skips cross-validated tuning (used by experiments)."""
+            seed: int = 42) -> "TasteModel":
         if len(history) < 5:
             raise ValueError("Add at least 5 books to your reading history (15+ works much better).")
         history = history.drop_duplicates("_key").reset_index(drop=True)
-        if len(history) > 3000 or len(history) > 0.3 * len(catalog):
-            raise ValueError(
-                f"'Books I have read' contains {len(history):,} books, which looks like the full "
-                f"catalogue ({len(catalog):,}). Upload a SMALL file with only the books YOU read "
-                "(10-200 rows, same columns as Books.csv). The full Books.csv belongs in data/ only.")
         y_pos = _targets(history)
         unread = catalog[~catalog["_key"].isin(set(history["_key"]))]
         if "ISBN" in history and "ISBN" in unread:
             unread = unread[~unread["ISBN"].isin(set(history["ISBN"]) - {""})]
-        if len(unread) == 0:
-            raise ValueError("No unread books left in the catalogue to compare against.")
         n_neg = min(len(unread), max(50, neg_ratio * len(history)))
         neg = unread.sample(n_neg, random_state=seed)
 
@@ -137,8 +125,7 @@ class TasteModel:
         y = np.concatenate([y_pos, np.zeros(len(neg))])
         label = np.concatenate([np.ones(len(history)), np.zeros(len(neg))]).astype(int)
 
-        self.report = {"cv": "skipped (alpha fixed)", "best_alpha": alpha} if alpha is not None \
-            else self._cross_validate(data, y, label, seed)
+        self.report = self._cross_validate(data, y, label, seed)
         self.alpha = self.report.get("best_alpha", 10.0)
         self.pipeline = _features()
         X = self.pipeline.fit_transform(data)
@@ -211,12 +198,10 @@ class TasteModel:
         down = [(pretty(names[i]), round(float(contrib[i]), 4)) for i in order[:top_k] if contrib[i] < -1e-4]
         return {"raises_match": up, "lowers_match": down}
 
-    def recommend(self, catalog: pd.DataFrame, history: pd.DataFrame, top_n: int = 20,
-                  max_per_author: int = 3) -> pd.DataFrame:
+    def recommend(self, catalog: pd.DataFrame, history: pd.DataFrame, top_n: int = 20) -> pd.DataFrame:
         pool = catalog[~catalog["_key"].isin(set(history["_key"]))].copy()
         pool["Match-Percentile"] = self.score(pool)
         pool = pool.sort_values("Match-Percentile", ascending=False).drop_duplicates("_key")
-        pool = pool.groupby("_author", sort=False).head(max_per_author)      # variety: few books per author
         return pool.head(top_n)[["Book-Title", "Book-Author", "Year", "Publisher", "ISBN", "Match-Percentile"]]
 
     # -------------------------------------------------------- persistence

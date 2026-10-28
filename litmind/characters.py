@@ -330,14 +330,10 @@ def extract_characters(
     min_mentions: int | None = None,
     max_characters: int = 40,
     model: str = "en_core_web_sm",
-    ablate: frozenset | set = frozenset(),
 ) -> CharacterResult:
-    """`ablate` switches components off for experiments (names: lexical, the_x, location, vote,
-    weak, clustering, the_title, regex_recall). Normal use leaves it empty."""
     nlp = nlp or load_nlp(model)
     sentences, sent_starts, male_pron, female_pron, mentions = _scan(text, nlp)
-    if "regex_recall" not in ablate:
-        mentions += _regex_recall(text, mentions, sent_starts)
+    mentions += _regex_recall(text, mentions, sent_starts)
     if min_mentions is None:
         min_mentions = max(5, len(text) // 100_000)
 
@@ -402,8 +398,6 @@ def extract_characters(
         why = None
         if len(c.tokens) == 1 and len(c.tokens[0]) < 3:
             why = "too short"
-        elif "lexical" in ablate:
-            pass
         elif k in NON_NAMES or (len(c.tokens) == 1 and c.tokens[0].lower() in NON_NAMES):
             why = "not a person name"
         elif any(t.lower() in PLACE_WORDS for t in c.tokens) and not c.titles:
@@ -416,9 +410,9 @@ def extract_characters(
                 why = "common word"
             elif low and low / (low + cap) > 0.2:
                 why = "also appears in lower case (common word)"
-            elif "the_x" not in ablate and not c.titles and cap and the_counts.get(w, 0) / cap >= 0.3:
+            elif not c.titles and cap and the_counts.get(w, 0) / cap >= 0.3:
                 why = "usually written 'the X' (river, people, ship or thing)"
-        if why is None and "location" not in ablate and c.place >= 3 and c.place > 1.5 * (c.subj + sum(c.titles.values())) \
+        if why is None and c.place >= 3 and c.place > 1.5 * (c.subj + sum(c.titles.values())) \
                 and not c.titles:
             why = f"used as a location ({c.place}x after 'in/near/on…') and rarely as an actor"
         if why:
@@ -450,10 +444,9 @@ def extract_characters(
         return pseudo
 
     notes: dict[str, str] = {}
-    cluster_on = "clustering" not in ablate
     # 4a. same-length nickname pairs: "Art"~"Arthur", "Jack Seward"~"John Seward".
     #     Only when the nickname matches exactly ONE other name (never chain people together).
-    for a in (sorted(cands, key=lambda x: -cands[x].count) if cluster_on else []):
+    for a in sorted(cands, key=lambda x: -cands[x].count):
         ta = cands[a].tokens
         matches = [b for b in cands
                    if b != a and len(cands[b].tokens) == len(ta) and cands[b].tokens[1:] == ta[1:]
@@ -464,7 +457,7 @@ def extract_characters(
                 union(a, find(matches[0]))
 
     # 4b. short name -> the longer name that contains it
-    for k in (sorted(cands, key=lambda x: -len(cands[x].tokens)) if cluster_on else []):
+    for k in sorted(cands, key=lambda x: -len(cands[x].tokens)):
         c = cands[k]
         tset = set(t.lower() for t in c.tokens)
         parents: dict[str, None] = {}
@@ -493,7 +486,7 @@ def extract_characters(
         return x == y or (len(x) >= 5 and len(y) >= 5 and x[0] == y[0] and abs(len(x) - len(y)) <= 1
                           and SequenceMatcher(None, x, y).ratio() >= 0.9)
 
-    keys = sorted(cands, key=lambda x: -cands[x].count) if cluster_on else []
+    keys = sorted(cands, key=lambda x: -cands[x].count)
     for i, a in enumerate(keys):
         for b in keys[i + 1:]:
             ta, tb = a.split(), b.split()
@@ -519,9 +512,9 @@ def extract_characters(
         why = None
         if total < min_mentions:
             why = f"fewer than {min_mentions} mentions"
-        elif "vote" not in ablate and other_votes > person_votes and not strong:
+        elif other_votes > person_votes and not strong:
             why = f"tagged as place/organisation {other_votes}x vs person {person_votes}x"
-        elif "weak" not in ablate and total < 15 and not (title_n or subj >= 2 or gender_known):
+        elif total < 15 and not (title_n or subj >= 2 or gender_known):
             why = "no sign of acting as a person (rarely a subject, no title, no he/she)"
         if why:
             rejected.append({"name": label, "mentions": total, "reason": why})
@@ -553,7 +546,7 @@ def extract_characters(
     for ch in chars:
         for t in ch.titles:
             holders[t].append(ch)
-    for m in (_THE_TITLE.finditer(text) if "the_title" not in ablate else []):
+    for m in _THE_TITLE.finditer(text):
         t = m.group(1).lower()
         if len(holders.get(t, [])) == 1:
             ch = holders[t][0]
