@@ -1,4 +1,4 @@
-"""LitMind 2 - Streamlit app.   Run:  streamlit run app.py"""
+"""LitMind  - Streamlit app.   Run:  streamlit run app.py"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,8 +18,8 @@ ROOT = Path(__file__).resolve().parent
 SAMPLES = {"Dracula": ROOT / "data/samples/Dracula.txt",
            "Sherlock Holmes (Adventures)": ROOT / "data/samples/Sherlock_Holmes.txt"}
 
-st.set_page_config(page_title="LitMind 2", page_icon="📚", layout="wide")
-st.title("📚 LitMind 2")
+st.set_page_config(page_title="LitMind", page_icon="📚", layout="wide")
+st.title("📚 LitMind ")
 st.caption("Characters & aliases · relationships · Gemini summary & genre · taste match")
 
 
